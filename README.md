@@ -1,8 +1,10 @@
-# Mạch RLC · Phòng thực hành
+# Mạch điện tương tác
 
-Website mô phỏng mạch điện xoay chiều RLC, viết bằng React, TypeScript và Vite. Phép tính RLC chạy hoàn toàn trong trình duyệt. Luồng nhận diện ảnh gửi ảnh đến Gemini qua Worker riêng.
+Website chỉnh sửa và tính toán mạch điện xoay chiều, viết bằng React, TypeScript và Vite. Trình soạn mạch chạy trên lưới tương tác, hỗ trợ kéo thả linh kiện/nút giao, nối hoặc xóa dây, xoay và sửa giá trị. Ngôn ngữ giao diện gồm tiếng Việt, Anh và Nga; mạch và ngôn ngữ được lưu trên thiết bị.
 
-Ứng dụng cũng có luồng **Ảnh → bo mạch**: Gemini nhận diện sơ đồ nguyên lý thành linh kiện/nút nối hoặc dựng layout PCB từ phần linh kiện và đường đồng nhìn thấy. Có thể kéo linh kiện, chỉnh dữ liệu, lưu/mở file `.board.json`. Kết quả nhận diện cần được kiểm tra trước khi dùng.
+Bộ giải AC dùng phân tích nút mở rộng (MNA) cho điện trở, cuộn cảm, tụ điện, nguồn áp AC, nối đất và công tắc. Các kết quả gồm công suất, hệ số công suất, điện áp và dòng điện từng linh kiện. Nút **Xuất PDF** mở hộp thoại in/lưu PDF của trình duyệt.
+
+Luồng **Ảnh → bo mạch** dùng Gemini qua Cloudflare Worker riêng để nhận diện sơ đồ nguyên lý thành linh kiện/nút nối hoặc dựng layout PCB từ phần linh kiện và đường đồng nhìn thấy. Có thể kéo linh kiện, chỉnh dữ liệu, lưu/mở file `.board.json`. Kiểm tra lại kết quả nhận diện trước khi dùng.
 
 ## Chạy trên máy
 
@@ -26,4 +28,4 @@ Workflow trong `.github/workflows/deploy.yml` tự kiểm tra và build khi push
 
 ## Mô hình mạch
 
-Mạch có tám vị trí linh kiện theo sơ đồ tham khảo. Mỗi vị trí có thể chứa nhiều linh kiện mắc nối tiếp; các nhánh kết nối theo sơ đồ cố định. Bộ giải dùng trở kháng phức và phân tích nút cho nguồn hình sin ở trạng thái ổn định. Điện trở nhập bằng Ω, cuộn cảm bằng mH, tụ điện bằng µF.
+Mạch mẫu khởi đầu giữ sơ đồ tham khảo RLC. Có thể sửa tự do hoặc đặt linh kiện mới trên canvas. Bộ giải dùng trạng thái ổn định hình sin; điện trở nhập bằng Ω, cuộn cảm bằng mH, tụ điện bằng µF, nguồn áp theo V RMS.

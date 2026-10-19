@@ -6,6 +6,7 @@ interface Env {
 }
 
 type Mode = 'schematic' | 'pcb';
+type Language = 'vi' | 'en' | 'ru';
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const MAX_REQUEST_BYTES = 11 * 1024 * 1024;
 const ALLOWED_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
@@ -77,13 +78,14 @@ export default {
     const limit = await env.IMAGE_IMPORT_LIMITER.limit({ key: `image-import:${clientIp}` });
     if (!limit.success) return respond({ error: 'Bạn đã gửi nhiều yêu cầu trong thời gian ngắn. Hãy đợi một phút rồi thử lại.' }, 429);
 
-    let body: { mode?: unknown; imageData?: unknown; mimeType?: unknown };
+    let body: { mode?: unknown; language?: unknown; imageData?: unknown; mimeType?: unknown };
     try {
       const raw = await request.arrayBuffer();
       if (raw.byteLength > MAX_REQUEST_BYTES) return respond({ error: 'Ảnh vượt quá giới hạn 8 MB.' }, 413);
       body = JSON.parse(new TextDecoder().decode(raw)) as typeof body;
     } catch { return respond({ error: 'Dữ liệu ảnh không phải JSON hợp lệ.' }, 400); }
     if (body.mode !== 'schematic' && body.mode !== 'pcb') return respond({ error: 'Chọn sơ đồ nguyên lý hoặc ảnh PCB.' }, 400);
+    if (body.language !== 'vi' && body.language !== 'en' && body.language !== 'ru') return respond({ error: 'Chọn ngôn ngữ hỗ trợ.' }, 400);
     if (typeof body.mimeType !== 'string' || !ALLOWED_MIME_TYPES.has(body.mimeType)) return respond({ error: 'Chỉ hỗ trợ ảnh JPG, PNG hoặc WEBP.' }, 415);
     if (typeof body.imageData !== 'string') return respond({ error: 'Thiếu dữ liệu ảnh.' }, 400);
     const image = body.imageData.match(/^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/]+={0,2})$/);
@@ -98,7 +100,7 @@ export default {
         signal: AbortSignal.timeout(45_000),
         body: JSON.stringify({
           contents: [{ role: 'user', parts: [
-            { text: buildPrompt(body.mode) },
+            { text: buildPrompt(body.mode, body.language) },
             { inlineData: { mimeType: body.mimeType, data: image[2] } },
           ] }],
           generationConfig: { temperature: 0.1, responseMimeType: 'application/json', responseSchema: boardSchema },
@@ -117,8 +119,9 @@ export default {
   },
 };
 
-function buildPrompt(mode: Mode) {
-  const common = `Analyze the attached image and return only the requested board JSON. Use a 0-1000 coordinate system for the board. Set format to "interactive-electrical-board", version to 1, and mode to "${mode}". List visible components with stable unique ids, references, normalized positions, rotation, confidence from 0 to 1, and pin offsets relative to component center within -250 to 250. Use an empty string when a value or label cannot be read. Include concise notes for ambiguous details. Never invent components or electrical connections that are not visible.`;
+function buildPrompt(mode: Mode, language: Language) {
+  const outputLanguage = language === 'vi' ? 'Vietnamese' : language === 'ru' ? 'Russian' : 'English';
+  const common = `Analyze the attached image and return only the requested board JSON. Use a 0-1000 coordinate system for the board. Set format to "interactive-electrical-board", version 1, and mode to "${mode}". List visible components with stable unique ids, references, normalized positions, rotation, confidence from 0 to 1, and pin offsets relative to component center within -250 to 250. Use an empty string when a value or label cannot be read. Include concise notes for ambiguous details. Never invent components or electrical connections that are not visible. Write the title, summary, notes, and human-readable pin labels in ${outputLanguage}. Keep references, IDs, units, and the required component type enum values unchanged.`;
   if (mode === 'schematic') return `${common}\nThis is a circuit schematic. Extract component symbols, readable designators and values, pin positions relative to each symbol center, junction nodes, and only connections supported by visible wire continuity. Each connection must reference an existing component id, pin id, and node id. Represent crossings without a junction as separate nodes. If this is not a circuit schematic, return empty components, nodes, connections, and traces arrays and explain why in notes.`;
   return `${common}\nThis is a photograph or drawing of a physical PCB. Extract component footprints and visible locations, plus only copper traces or conductive paths clearly visible in this image. Trace points use 0-1000 coordinates. Do not infer hidden copper layers, vias, a netlist, or connections from traces that cannot be followed visually. Return connections and nodes as empty arrays unless a pad-to-pad connection is completely visible. If this is not a PCB, return empty components, nodes, connections, and traces arrays and explain why in notes.`;
 }
