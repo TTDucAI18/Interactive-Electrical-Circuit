@@ -1,0 +1,16 @@
+name = "iec-image-to-board"
+main = "src/index.ts"
+compatibility_date = "2026-10-19"
+workers_dev = true
+
+[vars]
+MODEL = "gemini-3.8-flash"
+ALLOWED_ORIGINS = "https://ttducai18.github.io,http://localhost:5173"
+
+[[ratelimits]]
+name = "IMAGE_IMPORT_LIMITER"
+namespace_id = "900081"
+
+[ratelimits.simple]
+limit = 6
+period = 60
