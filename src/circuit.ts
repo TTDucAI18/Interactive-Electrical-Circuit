@@ -50,15 +50,15 @@ const polar = (magnitude: number, degrees: number): Complex => c(magnitude * Mat
 
 export const units: Partial<Record<ComponentKind, string>> = { R: 'Ω', L: 'mH', C: 'µF', VAC: 'V RMS' };
 
-export function componentPins(component: Pick<CircuitComponent, 'kind' | 'x' | 'y' | 'rotation'>): Array<{ pinId: PinId; x: number; y: number }> {
+export function componentPins(component: Pick<CircuitComponent, 'kind' | 'x' | 'y' | 'rotation'>, scale = 1): Array<{ pinId: PinId; x: number; y: number }> {
   const angle = component.rotation * Math.PI / 180;
   const local = component.kind === 'GND'
     ? [{ pinId: 'g' as const, x: 0, y: -20 }]
     : [{ pinId: 'a' as const, x: -30, y: 0 }, { pinId: 'b' as const, x: 30, y: 0 }];
   return local.map((pin) => ({
     pinId: pin.pinId,
-    x: component.x + pin.x * Math.cos(angle) - pin.y * Math.sin(angle),
-    y: component.y + pin.x * Math.sin(angle) + pin.y * Math.cos(angle),
+    x: component.x + (pin.x * Math.cos(angle) - pin.y * Math.sin(angle)) * scale,
+    y: component.y + (pin.x * Math.sin(angle) + pin.y * Math.cos(angle)) * scale,
   }));
 }
 
@@ -334,6 +334,25 @@ export function moveCircuitComponent(circuit: CircuitDocument, componentId: stri
 }
 export function moveCircuitNode(circuit: CircuitDocument, nodeId: string, position: Point): CircuitDocument {
   return { ...circuit, nodes: circuit.nodes.map((item) => item.id === nodeId ? { ...item, x: position.x, y: position.y } : item) };
+}
+export function snapCircuitPoint(circuit: CircuitDocument, point: Point, moving?: { kind: 'component' | 'node'; id: string }, grid = 20, tolerance = 12): { position: Point; guides: { x?: number; y?: number } } {
+  const targets = [
+    ...circuit.components.filter((part) => moving?.kind !== 'component' || part.id !== moving.id).map((part) => ({ x: part.x, y: part.y })),
+    ...circuit.nodes.filter((node) => moving?.kind !== 'node' || node.id !== moving.id).map((node) => ({ x: node.x, y: node.y })),
+  ];
+  const nearest = (axis: 'x' | 'y') => targets
+    .map((target) => target[axis])
+    .filter((value) => Math.abs(value - point[axis]) <= tolerance)
+    .sort((a, b) => Math.abs(a - point[axis]) - Math.abs(b - point[axis]))[0];
+  const alignedX = nearest('x');
+  const alignedY = nearest('y');
+  return {
+    position: {
+      x: Math.max(16, Math.min(984, Math.round((alignedX ?? Math.round(point.x / grid) * grid)))),
+      y: Math.max(16, Math.min(684, Math.round((alignedY ?? Math.round(point.y / grid) * grid)))),
+    },
+    guides: { x: alignedX, y: alignedY },
+  };
 }
 export function connectCircuitEndpoints(circuit: CircuitDocument, wire: CircuitWire): CircuitDocument {
   const keys = [endpointKey(wire.from), endpointKey(wire.to)].sort();

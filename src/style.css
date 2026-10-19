@@ -46,3 +46,47 @@ body{font-size:14px}.topbar{height:auto;min-height:72px;gap:14px}.topbar-end{dis
   .print-report table{page-break-inside:auto}
   .print-report tr{break-inside:avoid}
 }
+
+/* Board navigation, alignment hints, inline result editing, and short action feedback. */
+.view-controls{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:0 0 10px;padding:11px 13px;border:1px solid #e9eee8;border-radius:8px;background:#fbfcfa}
+.range-control{display:grid;grid-template-columns:minmax(105px,auto) minmax(70px,1fr) 48px;gap:10px;align-items:center;color:#607066;font-size:13px;font-weight:600}
+.range-control input{width:100%;min-width:70px;accent-color:#4d8460;touch-action:pan-y;cursor:pointer}
+.range-control output{min-width:44px;text-align:right;color:#4a7855;font-variant-numeric:tabular-nums}
+.palette-item kbd,.palette-junction kbd{margin-left:3px;padding:1px 4px;border:1px solid #d9e4da;border-radius:4px;background:#fff;color:#75847a;font:600 10px 'DM Sans',sans-serif}
+.tool-button:disabled{opacity:.48;cursor:not-allowed}
+.circuit-svg:not(.read-only){overscroll-behavior:contain}
+.alignment-guide{fill:none;stroke:#df9b4b;stroke-width:1.5;stroke-dasharray:7 6;vector-effect:non-scaling-stroke;pointer-events:none;opacity:.85}
+.circuit-part.hovered .part-hitbox{fill:#eaf4eb;stroke:#a6caaa;stroke-width:1.5}
+.circuit-part.selected .part-hitbox{fill:#f1f8f1;stroke:#b8d2ba;stroke-width:1.5}
+.circuit-part.selected .symbol-body,.circuit-part.selected .symbol-source{filter:drop-shadow(0 0 4px rgba(88,148,99,.35))}
+.circuit-part:active{filter:drop-shadow(0 0 5px rgba(88,148,99,.55))}
+.junction.hovered .junction-dot,.junction.selected .junction-dot{filter:drop-shadow(0 0 4px rgba(78,137,89,.58))}
+.junction:active .junction-dot{fill:#dfaa5c}
+.wires>g.hovered .wire-visible{stroke:#4f8c5c;stroke-width:5}
+.wire-hit:active{stroke:#76a67c;stroke-width:17;stroke-opacity:.32}
+.circuit-part.selected,.junction.selected{animation:select-pop .2s ease-out}
+@keyframes select-pop{0%{opacity:.74}55%{opacity:1}100%{opacity:1}}
+.source-note{animation:notice-pop .24s ease-out}
+@keyframes notice-pop{0%{transform:scale(.96);opacity:.55}100%{transform:scale(1);opacity:1}}
+.palette-item button,.palette-junction,.tool-button,.property-actions button,.danger-text,.reset-button,.export-pdf,.small-icon-button{transition:background-color .16s ease,border-color .16s ease,color .16s ease,transform .12s ease,box-shadow .16s ease}
+.palette-item button:active,.palette-junction:active,.tool-button:active,.property-actions button:active,.danger-text:active,.reset-button:active,.export-pdf:active,.small-icon-button:active{transform:scale(.97);box-shadow:0 0 0 3px rgba(92,143,99,.13)}
+.result-edit-stack{display:grid;gap:4px;min-width:130px}
+.result-edit-stack>input{width:100%;min-width:95px;height:32px;padding:0 7px;border:1px solid transparent;border-radius:5px;background:transparent;color:#3f5145;font:600 14px 'DM Sans',sans-serif}
+.result-edit-stack>input:not([readonly]):focus,.result-value-input:focus-within,.result-value-field select:focus{outline:0;border-color:#91b397;box-shadow:0 0 0 2px #edf5ee}
+.result-edit-stack>span{color:#859188;font-size:12px}
+.result-value-field{display:grid;grid-template-columns:auto minmax(80px,1fr);align-items:center;gap:6px;color:#859188;font-size:12px}
+.result-value-input{display:flex;align-items:center;min-width:0;height:31px;padding:0 6px;border:1px solid #e6ece5;border-radius:5px;background:#fff}
+.result-value-input input{width:100%;min-width:0;border:0;outline:0;background:transparent;color:#435047;font:500 13px 'DM Sans',sans-serif}
+.result-value-input i{flex:none;color:#859188;font-size:11px;font-style:normal}
+.result-value-field select{width:100%;min-height:31px;padding:0 5px;border:1px solid #e6ece5;border-radius:5px;background:#fff;color:#435047;font:500 12px 'DM Sans',sans-serif}
+.help-panel{scroll-margin-top:90px;animation:notice-pop .2s ease-out}
+@media(max-width:700px){
+  .view-controls{grid-template-columns:1fr;gap:9px;padding:10px}
+  .range-control{grid-template-columns:minmax(105px,.8fr) minmax(70px,1fr) 44px;gap:8px;min-height:34px;font-size:14px}
+  .range-control input{height:26px}
+  .undo-button{order:5}
+  .result-edit-stack>input{min-height:38px;font-size:14px}
+  .result-value-input{height:38px}
+  .result-value-field select{min-height:38px}
+}
+@media(prefers-reduced-motion:reduce){.circuit-part.selected,.junction.selected,.source-note,.help-panel{animation:none}}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { calculateCircuit, connectCircuitEndpoints, createDefaultCircuit, deserializeCircuit, moveCircuitComponent, moveCircuitNode, removeCircuitItem, serializeCircuit, validateCircuit, type CircuitComponent, type CircuitDocument, type CircuitWire } from './circuit';
+import { calculateCircuit, connectCircuitEndpoints, createDefaultCircuit, deserializeCircuit, moveCircuitComponent, moveCircuitNode, removeCircuitItem, serializeCircuit, snapCircuitPoint, validateCircuit, type CircuitComponent, type CircuitDocument, type CircuitWire } from './circuit';
 
 const component = (id: string, kind: CircuitComponent['kind'], value: number, x: number, y: number): CircuitComponent => ({ id, label: id.toUpperCase(), kind, value, x, y, rotation: 0, phase: 0, switchClosed: true });
 const pin = (componentId: string, pinId: 'a' | 'b' | 'g') => ({ type: 'pin' as const, componentId, pinId });
@@ -154,6 +154,15 @@ describe('editable circuit graph helpers', () => {
     expect(movedNode.components.find((part) => part.id === 'r1')).toMatchObject({ x: 350, y: 400 });
     expect(movedNode.nodes.find((item) => item.id === 'source+')).toMatchObject({ x: 120, y: 110 });
     expect(circuit.components.find((part) => part.id === 'r1')?.x).toBe(174);
+  });
+
+  it('snaps to the grid and aligns axes with nearby parts and junctions', () => {
+    const circuit = createDefaultCircuit();
+    const aligned = snapCircuitPoint(circuit, { x: 178, y: 258 }, { kind: 'component', id: 'r1' });
+    expect(aligned.position).toEqual({ x: 174, y: 265 });
+    expect(aligned.guides).toEqual({ x: 174, y: 265 });
+    const grid = snapCircuitPoint(circuit, { x: 337, y: 329 });
+    expect(grid.position).toEqual({ x: 340, y: 320 });
   });
 
   it('connects endpoints once and removes attached connections with a deleted item', () => {
