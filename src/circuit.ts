@@ -16,7 +16,8 @@ export type CircuitComponent = {
 };
 
 export type CircuitNode = { id: string; label: string; x: number; y: number };
-export type CircuitWire = { id: string; from: WireEndpoint; to: WireEndpoint; via: Point[] };
+export type WireRouteAxis = 'x' | 'y';
+export type CircuitWire = { id: string; from: WireEndpoint; to: WireEndpoint; via: Point[]; routeAxis?: WireRouteAxis };
 export type CircuitDocument = { version: 2; frequency: number; components: CircuitComponent[]; nodes: CircuitNode[]; wires: CircuitWire[] };
 export type Complex = { re: number; im: number };
 export type ComponentResult = { voltage: Complex; current: Complex; impedance: Complex | null };
@@ -303,7 +304,7 @@ export function validateCircuit(value: unknown): CircuitDocument {
   const wireIds = new Set<string>();
   for (const edge of circuit.wires) {
     const endpoints = [edge.from, edge.to];
-    if (!edge.id || wireIds.has(edge.id) || !Array.isArray(edge.via) || edge.via.length > 20) throw new Error('A wire has invalid fields.');
+    if (!edge.id || wireIds.has(edge.id) || !Array.isArray(edge.via) || edge.via.length > 20 || (edge.routeAxis !== undefined && edge.routeAxis !== 'x' && edge.routeAxis !== 'y')) throw new Error('A wire has invalid fields.');
     wireIds.add(edge.id);
     for (const endpoint of endpoints) {
       if (endpoint.type === 'node' && !nodeIds.has(endpoint.nodeId)) throw new Error('A wire refers to a missing junction.');
@@ -335,24 +336,100 @@ export function moveCircuitComponent(circuit: CircuitDocument, componentId: stri
 export function moveCircuitNode(circuit: CircuitDocument, nodeId: string, position: Point): CircuitDocument {
   return { ...circuit, nodes: circuit.nodes.map((item) => item.id === nodeId ? { ...item, x: position.x, y: position.y } : item) };
 }
-export function snapCircuitPoint(circuit: CircuitDocument, point: Point, moving?: { kind: 'component' | 'node'; id: string }, grid = 20, tolerance = 12): { position: Point; guides: { x?: number; y?: number } } {
-  const targets = [
-    ...circuit.components.filter((part) => moving?.kind !== 'component' || part.id !== moving.id).map((part) => ({ x: part.x, y: part.y })),
-    ...circuit.nodes.filter((node) => moving?.kind !== 'node' || node.id !== moving.id).map((node) => ({ x: node.x, y: node.y })),
-  ];
-  const nearest = (axis: 'x' | 'y') => targets
-    .map((target) => target[axis])
-    .filter((value) => Math.abs(value - point[axis]) <= tolerance)
-    .sort((a, b) => Math.abs(a - point[axis]) - Math.abs(b - point[axis]))[0];
-  const alignedX = nearest('x');
-  const alignedY = nearest('y');
-  return {
-    position: {
-      x: Math.max(16, Math.min(984, Math.round((alignedX ?? Math.round(point.x / grid) * grid)))),
-      y: Math.max(16, Math.min(684, Math.round((alignedY ?? Math.round(point.y / grid) * grid)))),
-    },
-    guides: { x: alignedX, y: alignedY },
+export function snapCircuitPoint(
+  circuit: CircuitDocument,
+  point: Point,
+  moving?: { kind: 'component' | 'node'; id: string },
+  grid = 28,
+  tolerance = 12,
+  enabled = true,
+  componentScale = 1,
+): { position: Point; guides: { x?: number; y?: number } } {
+  const clamp = (value: number, max: number) => Math.max(16, Math.min(max - 16, Math.round(value)));
+  if (!enabled) return { position: { x: clamp(point.x, 1000), y: clamp(point.y, 700) }, guides: {} };
+
+  const targets: Point[] = [];
+  for (const part of circuit.components) {
+    if (moving?.kind === 'component' && part.id === moving.id) continue;
+    targets.push({ x: part.x, y: part.y }, ...componentPins(part, componentScale).map(({ x, y }) => ({ x, y })));
+  }
+  for (const node of circuit.nodes) {
+    if (moving?.kind === 'node' && node.id === moving.id) continue;
+    targets.push({ x: node.x, y: node.y });
+  }
+
+  const anchors: Point[] = [{ x: 0, y: 0 }];
+  if (moving?.kind === 'component') {
+    const part = circuit.components.find((item) => item.id === moving.id);
+    if (part) anchors.push(...componentPins(part, componentScale).map(({ x, y }) => ({ x: x - part.x, y: y - part.y })));
+  }
+
+  const snapAxis = (axis: 'x' | 'y') => {
+    const alignments = targets.flatMap((target) => anchors.map((anchor) => {
+      const delta = target[axis] - (point[axis] + anchor[axis]);
+      return { delta, line: target[axis] };
+    })).filter((candidate) => Math.abs(candidate.delta) <= tolerance)
+      .sort((a, b) => Math.abs(a.delta) - Math.abs(b.delta));
+    const gridValue = Math.round(point[axis] / grid) * grid;
+    const gridDelta = gridValue - point[axis];
+    const gridIsClose = Math.abs(gridDelta) <= tolerance;
+    const alignment = alignments[0];
+
+    // Nearby terminals/nodes take precedence over the visual grid. Grid snapping is soft:
+    // the cursor stays free when the closest grid line is outside the magnetic radius.
+    if (alignment && (!gridIsClose || Math.abs(alignment.delta) <= Math.abs(gridDelta) + 2)) {
+      return { value: point[axis] + alignment.delta, guide: alignment.line };
+    }
+    return { value: gridIsClose ? gridValue : point[axis], guide: undefined };
   };
+
+  const x = snapAxis('x');
+  const y = snapAxis('y');
+  return {
+    position: { x: clamp(x.value, 1000), y: clamp(y.value, 700) },
+    guides: { x: x.guide, y: y.guide },
+  };
+}
+
+export function circuitEndpointPoint(circuit: CircuitDocument, endpoint: WireEndpoint, componentScale = 1): Point {
+  if (endpoint.type === 'node') {
+    const node = circuit.nodes.find((item) => item.id === endpoint.nodeId);
+    return node ? { x: node.x, y: node.y } : { x: 0, y: 0 };
+  }
+  const component = circuit.components.find((item) => item.id === endpoint.componentId);
+  return component
+    ? componentPins(component, componentScale).find((pin) => pin.pinId === endpoint.pinId) ?? { x: component.x, y: component.y }
+    : { x: 0, y: 0 };
+}
+
+export function circuitWireRouteAxis(wire: CircuitWire, from: Point, to: Point): WireRouteAxis {
+  if (wire.routeAxis) return wire.routeAxis;
+  if (wire.via.length >= 2) {
+    const sameX = Math.abs(wire.via[0].x - wire.via[1].x) < 0.5;
+    const sameY = Math.abs(wire.via[0].y - wire.via[1].y) < 0.5;
+    return sameX ? 'x' : sameY ? 'y' : 'x';
+  }
+  if (wire.via.length === 1) {
+    const bend = wire.via[0];
+    if (Math.abs(bend.y - from.y) < 0.5 || Math.abs(bend.y - to.y) < 0.5) return 'x';
+    if (Math.abs(bend.x - from.x) < 0.5 || Math.abs(bend.x - to.x) < 0.5) return 'y';
+  }
+  return Math.abs(to.y - from.y) >= 1 ? 'x' : 'y';
+}
+
+export function routeCircuitWire(circuit: CircuitDocument, wireId: string, axis: WireRouteAxis, coordinate: number, componentScale = 1): CircuitDocument {
+  const wire = circuit.wires.find((item) => item.id === wireId);
+  if (!wire) return circuit;
+  const from = circuitEndpointPoint(circuit, wire.from, componentScale);
+  const to = circuitEndpointPoint(circuit, wire.to, componentScale);
+  const via = axis === 'x'
+    ? [{ x: coordinate, y: from.y }, { x: coordinate, y: to.y }]
+    : [{ x: from.x, y: coordinate }, { x: to.x, y: coordinate }];
+  return { ...circuit, wires: circuit.wires.map((item) => item.id === wireId ? { ...item, via, routeAxis: axis } : item) };
+}
+
+export function resetCircuitWireRoute(circuit: CircuitDocument, wireId: string): CircuitDocument {
+  return { ...circuit, wires: circuit.wires.map((wire) => wire.id === wireId ? { ...wire, via: [], routeAxis: undefined } : wire) };
 }
 export function connectCircuitEndpoints(circuit: CircuitDocument, wire: CircuitWire): CircuitDocument {
   const keys = [endpointKey(wire.from), endpointKey(wire.to)].sort();

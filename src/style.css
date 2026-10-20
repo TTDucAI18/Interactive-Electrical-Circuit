@@ -90,3 +90,17 @@ body{font-size:14px}.topbar{height:auto;min-height:72px;gap:14px}.topbar-end{dis
   .result-value-field select{min-height:38px}
 }
 @media(prefers-reduced-motion:reduce){.circuit-part.selected,.junction.selected,.source-note,.help-panel{animation:none}}
+
+/* Magnetic alignment and direct orthogonal wire routing. */
+.magnet-toggle{position:relative;padding-right:10px}
+.magnet-toggle small{padding:2px 5px;border-radius:4px;background:#f0f3ef;color:#78857b;font-size:10px;line-height:1.2;white-space:nowrap}
+.magnet-toggle.active small{background:#dcebdd;color:#47764f}
+.canvas-help .cancel-placement{flex:none;min-height:30px;margin-left:auto;padding:0 9px;border:1px solid #dce8dd;border-radius:6px;background:#fff;color:#55765d;font:600 13px 'DM Sans',sans-serif;cursor:pointer}
+.palette-item button.place-pending,.palette-junction.place-pending{border-color:#8cb392;background:#eaf4eb;color:#3f7954;box-shadow:0 0 0 2px rgba(87,142,94,.12)}
+.palette-item button.place-pending kbd{display:none}
+.wire-route-hit{fill:transparent;stroke:transparent;stroke-width:25;cursor:ew-resize;pointer-events:all;touch-action:none}
+.wire-route-hit.visible{stroke:rgba(223,153,75,.22);stroke-width:20}
+.wire-route-knob{fill:#fff9ef;stroke:#d28c3f;stroke-width:2.5;vector-effect:non-scaling-stroke;filter:drop-shadow(0 1px 3px rgba(75,58,34,.25))}
+.route-reset-button{min-height:39px;padding:0 10px;border:1px solid #dce7dc;border-radius:7px;background:#f8fbf7;color:#55765d;font:600 13px 'DM Sans',sans-serif;display:flex;align-items:center;justify-content:center;gap:7px;cursor:pointer}
+.route-reset-button:hover,.canvas-help .cancel-placement:hover{background:#eaf3eb}
+@media(max-width:700px){.magnet-toggle{gap:5px}.magnet-toggle small{font-size:9px}.canvas-help{flex-wrap:wrap}.canvas-help .cancel-placement{min-height:34px}.wire-route-hit{stroke-width:30}}
