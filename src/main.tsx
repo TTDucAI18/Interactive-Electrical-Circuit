@@ -1,16 +1,20 @@
 import React, { useEffect, useMemo, useRef, useState, type DragEvent, type PointerEvent } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Activity, BookOpen, Cable, Check, ChevronDown, CircleHelp, CircuitBoard, Download, ImagePlus, Magnet, Plus, RotateCcw, RotateCw, Trash2, Zap } from 'lucide-react';
+import { Activity, BookOpen, Cable, Check, ChevronDown, CircleHelp, CircuitBoard, Crosshair, Download, ImagePlus, Magnet, Plus, RotateCcw, RotateCw, Square, Trash2, Triangle, Zap } from 'lucide-react';
 import ImageWorkbench from './ImageWorkbench';
 import { calculateCircuit, circuitEndpointPoint, circuitWireRouteAxis, componentPins, connectCircuitEndpoints, createDefaultCircuit, deserializeCircuit, magnitude, moveCircuitComponent, moveCircuitNode, removeCircuitItem, resetCircuitWireRoute, routeCircuitWire, serializeCircuit, snapCircuitPoint, type CircuitComponent, type CircuitDocument, type CircuitNode, type CircuitResult, type CircuitWire, type ComponentKind, type Point, type WireEndpoint, type WireRouteAxis } from './circuit';
 import { componentNameKey, translate, type Language, type TranslationKey } from './i18n';
 import './style.css';
 
-type Selection = { kind: 'component' | 'node' | 'wire'; id: string } | null;
+type CanvasShapeKind = 'triangle' | 'square';
+type CanvasShape = { id: string; kind: CanvasShapeKind; x: number; y: number; width: number; height: number };
+type Selection = { kind: 'component' | 'node' | 'wire' | 'shape'; id: string } | null;
 type Tool = 'select' | 'wire';
 const CIRCUIT_KEY = 'iec-circuit-v2';
 const LANGUAGE_KEY = 'iec-language';
 const ZOOM_KEY = 'iec-board-zoom';
+const PAN_KEY = 'iec-board-pan';
+const SHAPES_KEY = 'iec-board-shapes';
 const COMPONENT_SCALE_KEY = 'iec-component-scale';
 const SNAP_KEY = 'iec-magnetic-snap';
 const paletteKinds: ComponentKind[] = ['R', 'L', 'C', 'VAC', 'GND', 'SW'];
@@ -39,6 +43,22 @@ function readBoolean(key: string, fallback: boolean) {
   try { const value = localStorage.getItem(key); return value === null ? fallback : value === 'true'; }
   catch { return fallback; }
 }
+function readPan(): Point {
+  try {
+    const value = JSON.parse(localStorage.getItem(PAN_KEY) ?? 'null') as Partial<Point> | null;
+    if (value && Number.isFinite(value.x) && Number.isFinite(value.y)) return { x: clampScale(value.x!, -700, 700), y: clampScale(value.y!, -490, 490) };
+  } catch { /* Use the centered canvas when stored view data is invalid. */ }
+  return { x: 0, y: 0 };
+}
+function readCanvasShapes(): CanvasShape[] {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(SHAPES_KEY) ?? '[]');
+    if (!Array.isArray(value)) return [];
+    return value.filter((item): item is CanvasShape => !!item && typeof item === 'object'
+      && typeof item.id === 'string' && (item.kind === 'triangle' || item.kind === 'square')
+      && [item.x, item.y, item.width, item.height].every(Number.isFinite));
+  } catch { return []; }
+}
 function clampScale(value: number, min: number, max: number) { return Math.max(min, Math.min(max, value)); }
 function wireRouteCoordinate(wire: CircuitWire, axis: WireRouteAxis, from: Point, to: Point) {
   if (wire.via.length) return wire.via[0][axis];
@@ -54,9 +74,13 @@ function App() {
   const [hovered, setHovered] = useState<Selection>(null);
   const [tool, setTool] = useState<Tool>('select');
   const [zoom, setZoom] = useState(() => readScale(ZOOM_KEY, 1, 0.5, 2));
+  const [pan, setPan] = useState<Point>(readPan);
   const [componentScale, setComponentScale] = useState(() => readScale(COMPONENT_SCALE_KEY, 1, 0.65, 1.6));
   const [magnetSnap, setMagnetSnap] = useState(() => readBoolean(SNAP_KEY, true));
+  const [showAxes, setShowAxes] = useState(true);
+  const [shapes, setShapes] = useState<CanvasShape[]>(readCanvasShapes);
   const [pendingComponentKind, setPendingComponentKind] = useState<ComponentKind | null>(null);
+  const [pendingShapeKind, setPendingShapeKind] = useState<CanvasShapeKind | null>(null);
   const [pendingJunction, setPendingJunction] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
   const [wireStart, setWireStart] = useState<WireEndpoint | null>(null);
@@ -66,7 +90,10 @@ function App() {
   const wireDrag = useRef<{ endpoint: WireEndpoint; start: Point; latest: Point } | null>(null);
   const wireRouteDrag = useRef<{ id: string; axis: WireRouteAxis; before: CircuitDocument; startCoordinate: number; moved: boolean } | null>(null);
   const drag = useRef<{ kind: 'component' | 'node'; id: string; offset: Point; moved: boolean; before: CircuitDocument } | null>(null);
-  const undoStack = useRef<CircuitDocument[]>([]);
+  const shapeDrag = useRef<{ id: string; mode: 'move' | 'resize'; offset: Point; start: Point; width: number; height: number; moved: boolean; beforeCircuit: CircuitDocument; beforeShapes: CanvasShape[] } | null>(null);
+  const panDrag = useRef<{ pointerId: number; client: Point; pan: Point } | null>(null);
+  const [isPanning, setIsPanning] = useState(false);
+  const undoStack = useRef<{ circuit: CircuitDocument; shapes: CanvasShape[] }[]>([]);
   const pointerPositions = useRef(new Map<number, Point>());
   const pinch = useRef<{ distance: number; zoom: number } | null>(null);
   const [guides, setGuides] = useState<{ x?: number; y?: number }>({});
@@ -88,6 +115,14 @@ function App() {
     return () => window.clearTimeout(timer);
   }, [circuit]);
   useEffect(() => { try { localStorage.setItem(ZOOM_KEY, String(zoom)); } catch { /* Keep the view usable if storage is disabled. */ } }, [zoom]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => { try { localStorage.setItem(PAN_KEY, JSON.stringify(pan)); } catch { /* Keep the view usable if storage is disabled. */ } }, 180);
+    return () => window.clearTimeout(timer);
+  }, [pan]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => { try { localStorage.setItem(SHAPES_KEY, JSON.stringify(shapes)); } catch { /* Shapes remain usable in memory. */ } }, 180);
+    return () => window.clearTimeout(timer);
+  }, [shapes]);
   useEffect(() => { try { localStorage.setItem(COMPONENT_SCALE_KEY, String(componentScale)); } catch { /* Keep the view usable if storage is disabled. */ } }, [componentScale]);
   useEffect(() => { try { localStorage.setItem(SNAP_KEY, String(magnetSnap)); } catch { /* Keep the editor usable if storage is disabled. */ } }, [magnetSnap]);
   const calculation = useMemo(() => {
@@ -95,15 +130,15 @@ function App() {
     catch (error) { return { result: null, error }; }
   }, [circuit]);
 
-  const pushUndo = (snapshot: CircuitDocument) => {
-    undoStack.current.push(snapshot);
+  const pushUndo = (snapshot: CircuitDocument, shapeSnapshot = shapes) => {
+    undoStack.current.push({ circuit: snapshot, shapes: shapeSnapshot });
     if (undoStack.current.length > 60) undoStack.current.shift();
     setCanUndo(true);
   };
   const undo = () => {
     const previous = undoStack.current.pop();
     if (!previous) return;
-    setCircuit(previous); setSelected(null); setHovered(null); setNotice('undoApplied');
+    setCircuit(previous.circuit); setShapes(previous.shapes); setSelected(null); setHovered(null); setNotice('undoApplied');
     setCanUndo(undoStack.current.length > 0);
   };
   const updateComponent = (id: string, patch: Partial<CircuitComponent>) => {
@@ -133,6 +168,7 @@ function App() {
     pushUndo(circuit); setCircuit((current) => ({ ...current, components: [...current.components, component] }));
     setSelected({ kind: 'component', id: component.id });
     setPendingComponentKind(null);
+    setPendingShapeKind(null);
     setNotice('componentAdded');
   };
   const addJunction = (position?: Point) => {
@@ -143,6 +179,13 @@ function App() {
     pushUndo(circuit); setCircuit((current) => ({ ...current, nodes: [...current.nodes, junction] }));
     setSelected({ kind: 'node', id: junction.id });
     setPendingJunction(false);
+    setPendingShapeKind(null);
+  };
+  const addCanvasShape = (kind: CanvasShapeKind, position: Point) => {
+    const snapped = snapCircuitPoint(circuit, position, undefined, 20, Math.max(5, 14 / zoom), magnetSnap, componentScale).position;
+    const shape: CanvasShape = { id: newId('shape'), kind, x: snapped.x, y: snapped.y, width: 140, height: 140 };
+    pushUndo(circuit); setShapes((current) => [...current, shape]);
+    setSelected({ kind: 'shape', id: shape.id }); setPendingShapeKind(null); setNotice('shapeAdded');
   };
   const addWire = (from: WireEndpoint, to: WireEndpoint) => {
     if (JSON.stringify(from) === JSON.stringify(to)) return;
@@ -165,7 +208,7 @@ function App() {
     const matrix = svg?.getScreenCTM();
     if (!svg || !matrix) return { x: 500, y: 350 };
     const point = new DOMPoint(event.clientX, event.clientY).matrixTransform(matrix.inverse());
-    return clampPoint({ x: 500 + (point.x - 500) / zoom, y: 350 + (point.y - 350) / zoom });
+    return clampPoint({ x: 500 + (point.x - 500 - pan.x) / zoom, y: 350 + (point.y - 350 - pan.y) / zoom });
   };
   const completeWire = (from: WireEndpoint, event: PointerEvent<SVGSVGElement>) => {
     const point = svgPoint(event);
@@ -186,7 +229,7 @@ function App() {
     if (pointerPositions.current.size >= 2) {
       const [first, second] = [...pointerPositions.current.values()];
       pinch.current = { distance: Math.max(1, Math.hypot(second.x - first.x, second.y - first.y)), zoom };
-      drag.current = null; wireDrag.current = null; wireRouteDrag.current = null; setWireStart(null); setWireCursor(null); setGuides({});
+      drag.current = null; shapeDrag.current = null; panDrag.current = null; setIsPanning(false); wireDrag.current = null; wireRouteDrag.current = null; setWireStart(null); setWireCursor(null); setGuides({});
       svgRef.current?.setPointerCapture(event.pointerId); event.preventDefault(); return;
     }
     const target = event.target as SVGElement;
@@ -213,15 +256,33 @@ function App() {
       setSelected({ kind: 'wire', id: wire.id });
       svgRef.current?.setPointerCapture(event.pointerId); event.preventDefault(); return;
     }
-    if (pendingComponentKind || pendingJunction) {
-      const occupied = target.closest('[data-component-id],[data-node-id],[data-wire-id],[data-endpoint]');
+    const resizeShapeId = target.closest('[data-shape-resize]')?.getAttribute('data-shape-resize');
+    if (resizeShapeId) {
+      const shape = shapes.find((item) => item.id === resizeShapeId);
+      if (!shape) return;
+      shapeDrag.current = { id: shape.id, mode: 'resize', offset: { x: 0, y: 0 }, start: svgPoint(event), width: shape.width, height: shape.height, moved: false, beforeCircuit: circuit, beforeShapes: shapes };
+      setSelected({ kind: 'shape', id: shape.id });
+      svgRef.current?.setPointerCapture(event.pointerId); event.preventDefault(); return;
+    }
+    if (pendingComponentKind || pendingJunction || pendingShapeKind) {
+      const occupied = target.closest('[data-component-id],[data-node-id],[data-wire-id],[data-endpoint],[data-utility-shape]');
       if (!occupied) {
         const point = svgPoint(event);
         if (pendingComponentKind) addComponent(pendingComponentKind, point);
-        else addJunction(point);
+        else if (pendingJunction) addJunction(point);
+        else if (pendingShapeKind) addCanvasShape(pendingShapeKind, point);
         svgRef.current?.setPointerCapture(event.pointerId); event.preventDefault();
       }
       return;
+    }
+    const shapeId = target.closest('[data-utility-shape]')?.getAttribute('data-utility-shape');
+    if (shapeId) {
+      const shape = shapes.find((item) => item.id === shapeId);
+      if (!shape) return;
+      const point = svgPoint(event);
+      shapeDrag.current = { id: shapeId, mode: 'move', offset: { x: point.x - shape.x, y: point.y - shape.y }, start: point, width: shape.width, height: shape.height, moved: false, beforeCircuit: circuit, beforeShapes: shapes };
+      setSelected({ kind: 'shape', id: shapeId });
+      svgRef.current?.setPointerCapture(event.pointerId); event.preventDefault(); return;
     }
     const componentElement = target.closest('[data-component-id]');
     const componentId = componentElement?.getAttribute('data-component-id');
@@ -245,7 +306,14 @@ function App() {
     }
     const wireId = target.closest('[data-wire-id]')?.getAttribute('data-wire-id');
     if (wireId) setSelected({ kind: 'wire', id: wireId });
-    else setSelected(null);
+    else {
+      setSelected(null);
+      if (tool === 'select' && event.button === 0) {
+        panDrag.current = { pointerId: event.pointerId, client: { x: event.clientX, y: event.clientY }, pan };
+        setIsPanning(true);
+        svgRef.current?.setPointerCapture(event.pointerId); event.preventDefault();
+      }
+    }
   };
   const onPointerMove = (event: PointerEvent<SVGSVGElement>) => {
     if (pointerPositions.current.has(event.pointerId)) pointerPositions.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
@@ -256,6 +324,41 @@ function App() {
       event.preventDefault(); return;
     }
     const point = svgPoint(event);
+    const activePan = panDrag.current;
+    if (activePan?.pointerId === event.pointerId) {
+      const matrix = svgRef.current?.getScreenCTM();
+      if (matrix) {
+        const inverse = matrix.inverse();
+        const start = new DOMPoint(activePan.client.x, activePan.client.y).matrixTransform(inverse);
+        const current = new DOMPoint(event.clientX, event.clientY).matrixTransform(inverse);
+        setPan({ x: clampScale(activePan.pan.x + current.x - start.x, -700, 700), y: clampScale(activePan.pan.y + current.y - start.y, -490, 490) });
+      }
+      event.preventDefault(); return;
+    }
+    const activeShapeDrag = shapeDrag.current;
+    if (activeShapeDrag) {
+      const shape = shapes.find((item) => item.id === activeShapeDrag.id);
+      if (!shape) return;
+      if (activeShapeDrag.mode === 'move') {
+        const snapped = snapCircuitPoint(circuit, { x: point.x - activeShapeDrag.offset.x, y: point.y - activeShapeDrag.offset.y }, undefined, 20, Math.max(5, 14 / zoom), magnetSnap, componentScale);
+        setGuides(snapped.guides);
+        if (shape.x === snapped.position.x && shape.y === snapped.position.y) return;
+        if (!activeShapeDrag.moved) { pushUndo(activeShapeDrag.beforeCircuit, activeShapeDrag.beforeShapes); activeShapeDrag.moved = true; }
+        setShapes((current) => current.map((item) => item.id === shape.id ? { ...item, x: snapped.position.x, y: snapped.position.y } : item));
+      } else {
+        const dx = point.x - activeShapeDrag.start.x;
+        const dy = point.y - activeShapeDrag.start.y;
+        const width = clampScale(activeShapeDrag.width + dx * 2, 40, 600);
+        const height = clampScale(activeShapeDrag.height + dy * 2, 40, 600);
+        const size = shape.kind === 'square' ? clampScale(Math.max(width, height), 40, 600) : undefined;
+        const nextWidth = size ?? width;
+        const nextHeight = size ?? height;
+        if (shape.width === nextWidth && shape.height === nextHeight) return;
+        if (!activeShapeDrag.moved) { pushUndo(activeShapeDrag.beforeCircuit, activeShapeDrag.beforeShapes); activeShapeDrag.moved = true; }
+        setShapes((current) => current.map((item) => item.id === shape.id ? { ...item, width: nextWidth, height: nextHeight } : item));
+      }
+      event.preventDefault(); return;
+    }
     if (wireDrag.current) {
       wireDrag.current.latest = point; setWireCursor(point); return;
     }
@@ -290,14 +393,14 @@ function App() {
   const onPointerUp = (event: PointerEvent<SVGSVGElement>) => {
     pointerPositions.current.delete(event.pointerId);
     if (pinch.current) {
-      pinch.current = null; drag.current = null; wireDrag.current = null; wireRouteDrag.current = null; setWireStart(null); setWireCursor(null); setGuides({}); return;
+      pinch.current = null; drag.current = null; shapeDrag.current = null; panDrag.current = null; setIsPanning(false); wireDrag.current = null; wireRouteDrag.current = null; setWireStart(null); setWireCursor(null); setGuides({}); return;
     }
     if (wireDrag.current) {
       const d = wireDrag.current;
       if (Math.hypot(d.latest.x - d.start.x, d.latest.y - d.start.y) > 10) completeWire(d.endpoint, event);
       wireDrag.current = null;
     }
-    drag.current = null; wireRouteDrag.current = null; setGuides({});
+    drag.current = null; shapeDrag.current = null; panDrag.current = null; setIsPanning(false); wireRouteDrag.current = null; setGuides({});
   };
   const dropPosition = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -316,20 +419,37 @@ function App() {
       setCircuit((current) => removeCircuitItem(current, 'component', target.id));
     } else if (target.kind === 'node') {
       setCircuit((current) => removeCircuitItem(current, 'node', target.id));
+    } else if (target.kind === 'shape') {
+      setShapes((current) => current.filter((item) => item.id !== target.id));
     } else {
       setCircuit((current) => removeCircuitItem(current, 'wire', target.id));
     }
     setSelected(null); setHovered(null); setNotice('itemRemoved');
   };
-  const reset = () => { pushUndo(circuit); setCircuit(createDefaultCircuit()); setSelected(null); setHovered(null); setTool('select'); setWireStart(null); setPendingComponentKind(null); setPendingJunction(false); };
+  const updateCanvasShape = (id: string, patch: Partial<Pick<CanvasShape, 'width' | 'height'>>) => {
+    const shape = shapes.find((item) => item.id === id);
+    if (!shape) return;
+    let width = typeof patch.width === 'number' ? clampScale(patch.width, 40, 600) : shape.width;
+    let height = typeof patch.height === 'number' ? clampScale(patch.height, 40, 600) : shape.height;
+    if (shape.kind === 'square') width = height = clampScale(Math.max(width, height), 40, 600);
+    if (width === shape.width && height === shape.height) return;
+    pushUndo(circuit);
+    setShapes((current) => current.map((item) => item.id === id ? { ...item, width, height } : item));
+  };
+  const reset = () => { pushUndo(circuit); setCircuit(createDefaultCircuit()); setShapes([]); setPan({ x: 0, y: 0 }); setSelected(null); setHovered(null); setTool('select'); setWireStart(null); setPendingComponentKind(null); setPendingShapeKind(null); setPendingJunction(false); };
   const armComponentPlacement = (kind: ComponentKind) => {
-    setTool('select'); setWireStart(null); setPendingJunction(false);
+    setTool('select'); setWireStart(null); setPendingJunction(false); setPendingShapeKind(null);
     setPendingComponentKind((current) => current === kind ? null : kind);
   };
   const armJunctionPlacement = () => {
-    setTool('select'); setWireStart(null); setPendingComponentKind(null);
+    setTool('select'); setWireStart(null); setPendingComponentKind(null); setPendingShapeKind(null);
     setPendingJunction((current) => !current);
   };
+  const armShapePlacement = (kind: CanvasShapeKind) => {
+    setTool('select'); setWireStart(null); setPendingComponentKind(null); setPendingJunction(false);
+    setPendingShapeKind((current) => current === kind ? null : kind);
+  };
+  const centerView = () => { setPan({ x: 0, y: 0 }); setZoom(1); };
   const print = () => window.print();
 
   useEffect(() => {
@@ -339,13 +459,13 @@ function App() {
       if (['INPUT', 'SELECT', 'TEXTAREA'].includes(element.tagName) || element.isContentEditable) return;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); undo(); return; }
       if (/^[1-6]$/.test(event.key)) { event.preventDefault(); addComponent(paletteKinds[Number(event.key) - 1]); return; }
-      if (event.key.toLowerCase() === 'j') { event.preventDefault(); setPendingJunction(true); setPendingComponentKind(null); return; }
+      if (event.key.toLowerCase() === 'j') { event.preventDefault(); setPendingJunction(true); setPendingComponentKind(null); setPendingShapeKind(null); return; }
       if (event.key === 'Backspace' || event.key === 'Delete') {
         const target = event.key === 'Backspace' ? (hovered ?? selected) : (selected ?? hovered);
         if (target) { event.preventDefault(); removeSelected(target); }
         return;
       }
-      if (event.key === 'Escape') { setPendingComponentKind(null); setPendingJunction(false); setWireStart(null); setWireCursor(null); setTool('select'); return; }
+      if (event.key === 'Escape') { setPendingComponentKind(null); setPendingJunction(false); setPendingShapeKind(null); setWireStart(null); setWireCursor(null); setTool('select'); return; }
       if (!selected) return;
       if (event.key.toLowerCase() === 'r' && selected.kind === 'component') {
         const part = circuit.components.find((item) => item.id === selected.id);
@@ -413,19 +533,23 @@ function App() {
           <section className="canvas-card">
             <div className="canvas-header"><div><span className="section-kicker">{t('canvasTitle')}</span><h2>{t('canvasTitle')}</h2></div><div className="canvas-actions">
               <button className={tool === 'select' ? 'tool-button active' : 'tool-button'} aria-pressed={tool === 'select'} onClick={() => { setTool('select'); setWireStart(null); }}><Activity size={15} /> {t('toolSelect')}</button>
-              <button className={tool === 'wire' ? 'tool-button active' : 'tool-button'} aria-pressed={tool === 'wire'} onClick={() => { setTool('wire'); setWireStart(null); setPendingComponentKind(null); setPendingJunction(false); }}><Cable size={15} /> {t('toolWire')}</button>
+              <button className={tool === 'wire' ? 'tool-button active' : 'tool-button'} aria-pressed={tool === 'wire'} onClick={() => { setTool('wire'); setWireStart(null); setPendingComponentKind(null); setPendingShapeKind(null); setPendingJunction(false); }}><Cable size={15} /> {t('toolWire')}</button>
               <button className={`tool-button magnet-toggle ${magnetSnap ? 'active' : ''}`} aria-pressed={magnetSnap} title={`${t('smartAlign')}: ${t(magnetSnap ? 'snapOn' : 'snapOff')}`} onClick={() => setMagnetSnap((value) => !value)}><Magnet size={15} /> <span>{t('smartAlign')}</span><small>{t(magnetSnap ? 'snapOn' : 'snapOff')}</small></button>
               <button className="tool-button" onClick={armJunctionPlacement}><Plus size={15} /> {t('addJunction')}</button>
+              <button className={`tool-button ${pendingShapeKind === 'triangle' ? 'active' : ''}`} aria-pressed={pendingShapeKind === 'triangle'} onClick={() => armShapePlacement('triangle')}><Triangle size={15} /> {t('shapeTriangle')}</button>
+              <button className={`tool-button ${pendingShapeKind === 'square' ? 'active' : ''}`} aria-pressed={pendingShapeKind === 'square'} onClick={() => armShapePlacement('square')}><Square size={15} /> {t('shapeSquare')}</button>
+              <button className={`tool-button ${showAxes ? 'active' : ''}`} aria-pressed={showAxes} title={t('toggleAxes')} onClick={() => setShowAxes((value) => !value)}><span className="axis-tool-mark">OXY</span> {t('toggleAxes')}</button>
+              <button className="tool-button" title={t('centerView')} aria-label={t('centerView')} onClick={centerView}><Crosshair size={15} /> {t('centerView')}</button>
               <button className="tool-button undo-button" onClick={undo} disabled={!canUndo} title={t('undo')}><RotateCcw size={15} /> {t('undo')}</button>
               <button className="tool-button pdf-mobile" onClick={print}><Download size={15} /> {t('exportPdf')}</button>
             </div></div>
-            <div className="canvas-help"><CircleHelp size={15} /> <span>{pendingComponentKind || pendingJunction ? t('placePartHint') : wireStart ? t('wireStarted') : t('canvasHelp')}</span>{(pendingComponentKind || pendingJunction) && <button className="cancel-placement" onClick={() => { setPendingComponentKind(null); setPendingJunction(false); }}>{t('cancel')}</button>}</div>
+            <div className="canvas-help"><CircleHelp size={15} /> <span>{pendingShapeKind ? t('placeShapeHint') : pendingComponentKind || pendingJunction ? t('placePartHint') : wireStart ? t('wireStarted') : t('canvasHelp')}</span>{(pendingComponentKind || pendingJunction || pendingShapeKind) && <button className="cancel-placement" onClick={() => { setPendingComponentKind(null); setPendingJunction(false); setPendingShapeKind(null); }}>{t('cancel')}</button>}</div>
             <div className="view-controls">
               <label className="range-control"><span>{t('zoom')}</span><input aria-label={t('zoom')} type="range" min="0.5" max="2" step="0.05" value={zoom} onChange={(event) => setZoom(Number(event.target.value))} /><output>{Math.round(zoom * 100)}%</output></label>
               <label className="range-control"><span>{t('componentScale')}</span><input aria-label={t('componentScale')} type="range" min="0.65" max="1.6" step="0.05" value={componentScale} onChange={(event) => setComponentScale(Number(event.target.value))} /><output>{Math.round(componentScale * 100)}%</output></label>
             </div>
             <div className="canvas-wrap" onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; }} onDrop={dropPosition}>
-              <CircuitCanvas circuit={circuit} selected={selected} hovered={hovered} language={language} svgRef={svgRef} wireStart={wireStart} wireCursor={wireCursor} readOnly={false} zoom={zoom} componentScale={componentScale} guides={guides} routeEditable={tool === 'select'} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onSelect={setSelected} onHover={setHovered} onWheel={(event) => { if (event.ctrlKey || event.metaKey) { event.preventDefault(); setZoom((value) => clampScale(value * Math.exp(-event.deltaY * 0.002), 0.5, 2)); } }} />
+              <CircuitCanvas circuit={circuit} selected={selected} hovered={hovered} language={language} svgRef={svgRef} wireStart={wireStart} wireCursor={wireCursor} readOnly={false} zoom={zoom} pan={pan} componentScale={componentScale} guides={guides} shapes={shapes} showAxes={showAxes} isPanning={isPanning} routeEditable={tool === 'select'} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onSelect={setSelected} onHover={setHovered} onWheel={(event) => { if (event.ctrlKey || event.metaKey) { event.preventDefault(); setZoom((value) => clampScale(value * Math.exp(-event.deltaY * 0.002), 0.5, 2)); } }} />
             </div>
           </section>
           <section className="results-card" aria-live="polite"><div className="section-heading result-heading"><div><span className="section-kicker">{t('resultTitle')}</span><h2>{t('resultTitle')}</h2></div><span className="live-pill"><span /> {t('live')}</span></div>
@@ -438,6 +562,7 @@ function App() {
           {selected?.kind === 'component' && <ComponentInspector component={circuit.components.find((part) => part.id === selected.id)!} language={language} onChange={(patch) => updateComponent(selected.id, patch)} onRemove={removeSelected} />}
           {selected?.kind === 'node' && <NodeInspector node={circuit.nodes.find((item) => item.id === selected.id)!} language={language} onChange={(patch) => updateNode(selected.id, patch)} onRemove={removeSelected} />}
           {selected?.kind === 'wire' && <WireInspector wire={circuit.wires.find((item) => item.id === selected.id)!} circuit={circuit} language={language} onRemove={removeSelected} onAutoRoute={() => { pushUndo(circuit); setCircuit((current) => resetCircuitWireRoute(current, selected.id)); setNotice('routeUpdated'); }} />}
+          {selected?.kind === 'shape' && <ShapeInspector shape={shapes.find((item) => item.id === selected.id)!} language={language} onChange={(patch) => updateCanvasShape(selected.id, patch)} onRemove={removeSelected} />}
         </section>
           <section className="results-detail-card"><div className="panel-heading"><div><span className="section-kicker">{t('componentResults')}</span><h2>{t('componentResults')}</h2></div></div>{!result && <p className="muted-copy">{errorText(calculation.error)}</p>}<ComponentResultTable result={result} circuit={circuit} language={language} onComponentChange={updateComponent} /></section>
         </aside>
@@ -480,6 +605,17 @@ function WireInspector({ wire, circuit, language, onRemove, onAutoRoute }: { wir
   return <div className="property-form"><p className="muted-copy">{t('pdfConnections')}: {endpointLabel(wire.from, circuit, language)} → {endpointLabel(wire.to, circuit, language)}</p><p className="muted-copy">{t('routeHandleHint')}</p>{wire.via.length > 0 && <button className="route-reset-button" onClick={onAutoRoute}><RotateCcw size={15} /> {t('autoRoute')}</button>}<button className="danger-text" onClick={onRemove}><Trash2 size={15} /> {t('deleteSelected')}</button></div>;
 }
 
+function ShapeInspector({ shape, language, onChange, onRemove }: { shape: CanvasShape; language: Language; onChange: (patch: Partial<Pick<CanvasShape, 'width' | 'height'>>) => void; onRemove: () => void }) {
+  const t = (key: Parameters<typeof translate>[1]) => translate(language, key);
+  return <div className="property-form">
+    {shape.kind === 'square'
+      ? <label>{t('shapeSize')}<input type="number" min="40" max="600" step="10" value={shape.width} onChange={(event) => onChange({ width: Number(event.target.value) })} /></label>
+      : <><label>{t('shapeWidth')}<input type="number" min="40" max="600" step="10" value={shape.width} onChange={(event) => onChange({ width: Number(event.target.value) })} /></label><label>{t('shapeHeight')}<input type="number" min="40" max="600" step="10" value={shape.height} onChange={(event) => onChange({ height: Number(event.target.value) })} /></label></>}
+    <p className="muted-copy">x {Math.round(shape.x)} · y {Math.round(shape.y)}</p>
+    <button className="danger-text" onClick={onRemove}><Trash2 size={15} /> {t('deleteSelected')}</button>
+  </div>;
+}
+
 function endpointLabel(endpoint: WireEndpoint, circuit: CircuitDocument, language: Language) {
   if (endpoint.type === 'node') return circuit.nodes.find((node) => node.id === endpoint.nodeId)?.label ?? translate(language, 'unknownNode');
   const component = circuit.components.find((part) => part.id === endpoint.componentId);
@@ -489,10 +625,10 @@ function endpointLabel(endpoint: WireEndpoint, circuit: CircuitDocument, languag
 type CanvasProps = {
   circuit: CircuitDocument; selected: Selection; hovered?: Selection; language: Language; svgRef: React.RefObject<SVGSVGElement>;
   wireStart: WireEndpoint | null; wireCursor: Point | null; readOnly: boolean;
-  zoom?: number; componentScale?: number; guides?: { x?: number; y?: number }; routeEditable?: boolean;
+  zoom?: number; pan?: Point; componentScale?: number; guides?: { x?: number; y?: number }; shapes?: CanvasShape[]; showAxes?: boolean; isPanning?: boolean; routeEditable?: boolean;
   onPointerDown?: (event: PointerEvent<SVGSVGElement>) => void; onPointerMove?: (event: PointerEvent<SVGSVGElement>) => void; onPointerUp?: (event: PointerEvent<SVGSVGElement>) => void; onSelect?: (selection: Selection) => void; onHover?: (selection: Selection) => void; onWheel?: (event: React.WheelEvent<SVGSVGElement>) => void;
 };
-function CircuitCanvas({ circuit, selected, hovered = null, language, svgRef, wireStart, wireCursor, readOnly, zoom = 1, componentScale = 1, guides = {}, routeEditable = true, onPointerDown, onPointerMove, onPointerUp, onSelect, onHover, onWheel }: CanvasProps) {
+function CircuitCanvas({ circuit, selected, hovered = null, language, svgRef, wireStart, wireCursor, readOnly, zoom = 1, pan = { x: 0, y: 0 }, componentScale = 1, guides = {}, shapes = [], showAxes = false, isPanning = false, routeEditable = true, onPointerDown, onPointerMove, onPointerUp, onSelect, onHover, onWheel }: CanvasProps) {
   const t = (key: Parameters<typeof translate>[1]) => translate(language, key);
   const componentById = new Map(circuit.components.map((part) => [part.id, part]));
   const nodes = new Map(circuit.nodes.map((node) => [node.id, node]));
@@ -522,10 +658,20 @@ function CircuitCanvas({ circuit, selected, hovered = null, language, svgRef, wi
   };
   const previewStart = wireStart ? pointOf(wireStart) : null;
   const displayValue = (part: CircuitComponent) => part.kind === 'R' ? `${part.value} Ω` : part.kind === 'L' ? `${part.value} mH` : part.kind === 'C' ? `${part.value} µF` : part.kind === 'VAC' ? `${part.value} V` : part.kind === 'SW' ? (part.switchClosed ? t('closed') : t('open')) : '';
-  return <svg ref={svgRef} className={`circuit-svg ${readOnly ? 'read-only' : ''}`} viewBox="0 0 1000 700" role="img" aria-label={t('canvasTitle')} onPointerDown={readOnly ? undefined : onPointerDown} onPointerMove={readOnly ? undefined : onPointerMove} onPointerUp={readOnly ? undefined : onPointerUp} onPointerCancel={readOnly ? undefined : onPointerUp} onPointerLeave={readOnly ? undefined : () => onHover?.(null)} onWheel={readOnly ? undefined : onWheel}>
-    <defs><pattern id={readOnly ? 'print-grid' : 'editor-grid'} width="20" height="20" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1.5" fill="#e5eae4" /></pattern></defs>
-    <g transform={`translate(500 350) scale(${zoom}) translate(-500 -350)`}>
+  return <svg ref={svgRef} className={`circuit-svg ${readOnly ? 'read-only' : 'pan-enabled'} ${isPanning ? 'is-panning' : ''}`} viewBox="0 0 1000 700" role="img" aria-label={t('canvasTitle')} onPointerDown={readOnly ? undefined : onPointerDown} onPointerMove={readOnly ? undefined : onPointerMove} onPointerUp={readOnly ? undefined : onPointerUp} onPointerCancel={readOnly ? undefined : onPointerUp} onPointerLeave={readOnly ? undefined : () => onHover?.(null)} onWheel={readOnly ? undefined : onWheel}>
+    <defs><pattern id={readOnly ? 'print-grid' : 'editor-grid'} width="20" height="20" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1.5" fill="#e5eae4" /></pattern><marker id={readOnly ? 'axis-arrow-print' : 'axis-arrow'} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#7b9a80" /></marker></defs>
+    <g transform={`translate(${500 + pan.x} ${350 + pan.y}) scale(${zoom}) translate(-500 -350)`}>
     <rect width="1000" height="700" rx="16" fill={`url(#${readOnly ? 'print-grid' : 'editor-grid'})`} />
+    {showAxes && <g className="coordinate-axes" pointerEvents="none">
+      <path d="M 55 650 H 978 M 55 650 V 26" markerEnd={`url(#${readOnly ? 'axis-arrow-print' : 'axis-arrow'})`} />
+      {Array.from({ length: 9 }, (_, index) => 155 + index * 100).map((x) => <path key={`x-${x}`} d={`M ${x} 645 V 655`} />)}
+      {Array.from({ length: 6 }, (_, index) => 550 - index * 100).map((y) => <path key={`y-${y}`} d={`M 50 ${y} H 60`} />)}
+      {Array.from({ length: 9 }, (_, index) => 155 + index * 100).map((x, index) => <g key={`x-label-${x}`} transform={`translate(${x} 670) scale(${1 / zoom})`}><text className="axis-value" textAnchor="middle">{(index + 1) * 100}</text></g>)}
+      {Array.from({ length: 6 }, (_, index) => 550 - index * 100).map((y, index) => <g key={`y-label-${y}`} transform={`translate(42 ${y}) scale(${1 / zoom})`}><text className="axis-value" textAnchor="end" y="4">{(index + 1) * 100}</text></g>)}
+      <g transform={`translate(978 648) scale(${1 / zoom})`}><text x="8" y="5">X</text></g>
+      <g transform={`translate(55 26) scale(${1 / zoom})`}><text x="8" y="-8">Y</text></g>
+      <g transform={`translate(55 650) scale(${1 / zoom})`}><text x="-18" y="23">O</text></g>
+    </g>}
     {guides.x !== undefined && <line className="alignment-guide" x1={guides.x} x2={guides.x} y1="0" y2="700" />}
     {guides.y !== undefined && <line className="alignment-guide" x1="0" x2="1000" y1={guides.y} y2={guides.y} />}
     <g className="wires">{circuit.wires.map((wire) => {
@@ -541,6 +687,13 @@ function CircuitCanvas({ circuit, selected, hovered = null, language, svgRef, wi
       </g>;
     })}
       {wireStart && wireCursor && previewStart && <path className="wire-preview" d={`M ${previewStart.x} ${previewStart.y} L ${wireCursor.x} ${wireCursor.y}`} />}</g>
+    {shapes.map((shape) => <g key={shape.id} className={`utility-shape ${selected?.kind === 'shape' && selected.id === shape.id ? 'selected' : ''} ${hovered?.kind === 'shape' && hovered.id === shape.id ? 'hovered' : ''}`} data-utility-shape={shape.id} transform={`translate(${shape.x} ${shape.y})`} onPointerEnter={!readOnly ? () => onHover?.({ kind: 'shape', id: shape.id }) : undefined}>
+      {shape.kind === 'triangle'
+        ? <polygon points={`0,${-shape.height / 2} ${shape.width / 2},${shape.height / 2} ${-shape.width / 2},${shape.height / 2}`} />
+        : <rect x={-shape.width / 2} y={-shape.height / 2} width={shape.width} height={shape.height} rx="4" />}
+      {!readOnly && selected?.kind === 'shape' && selected.id === shape.id && <circle className="shape-resize-handle" data-shape-resize={shape.id} cx={shape.width / 2} cy={shape.height / 2} r="8" />}
+      <g transform={`translate(0 ${shape.height / 2 + 20}) scale(${1 / zoom})`}><text className="utility-shape-label">{shape.kind === 'triangle' ? t('shapeTriangle') : t('shapeSquare')}</text></g>
+    </g>)}
     {circuit.nodes.map((node) => <g key={node.id} className={`junction ${selected?.kind === 'node' && selected.id === node.id ? 'selected' : ''} ${hovered?.kind === 'node' && hovered.id === node.id ? 'hovered' : ''}`} data-node-id={node.id} onPointerEnter={!readOnly ? () => onHover?.({ kind: 'node', id: node.id }) : undefined}>
       <circle className="junction-hit" cx={node.x} cy={node.y} r="16" /><circle className="junction-dot" cx={node.x} cy={node.y} r="6" /><g transform={`translate(${node.x + 10} ${node.y - 10}) scale(${1 / zoom})`}><text>{node.label}</text></g>
       {!readOnly && <circle className="endpoint-hit" data-endpoint={JSON.stringify({ type: 'node', nodeId: node.id } satisfies WireEndpoint)} cx={node.x} cy={node.y} r="14" />}

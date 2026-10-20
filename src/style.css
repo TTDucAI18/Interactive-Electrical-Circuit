@@ -131,3 +131,17 @@ body{font-size:14px}.topbar{height:auto;min-height:72px;gap:14px}.topbar-end{dis
 @keyframes paywall-pop{from{opacity:0;transform:translateY(8px) scale(.96)}to{opacity:1;transform:translateY(0) scale(1)}}
 @media(max-width:520px){.analysis-progress{padding:10px}.prank-paywall{padding:24px 20px 18px}.prank-paywall h2{font-size:20px}.just-kidding-toast{top:12px;font-size:15px}}
 @media(prefers-reduced-motion:reduce){.analysis-progress-track.indeterminate>span,.prank-paywall-backdrop,.prank-paywall,.just-kidding-toast{animation:none}}
+
+/* Canvas navigation, coordinate axes, and non-electrical helper shapes. */
+.circuit-svg.pan-enabled{cursor:grab}
+.circuit-svg.is-panning,.circuit-svg.is-panning *{cursor:grabbing!important}
+.coordinate-axes path{fill:none;stroke:#89a18d;stroke-width:1;vector-effect:non-scaling-stroke}
+.coordinate-axes text{fill:#718a76;font:700 14px 'DM Sans',sans-serif;paint-order:stroke;stroke:#fcfdfa;stroke-width:4px;stroke-linejoin:round}
+.utility-shape{cursor:move;touch-action:none}
+.utility-shape polygon,.utility-shape rect{fill:rgba(93,139,102,.045);stroke:#6e9976;stroke-width:1.7;stroke-dasharray:8 5;vector-effect:non-scaling-stroke;transition:fill .14s ease,stroke .14s ease}
+.utility-shape.hovered polygon,.utility-shape.hovered rect,.utility-shape.selected polygon,.utility-shape.selected rect{fill:rgba(93,139,102,.11);stroke:#4e8759;stroke-dasharray:none}
+.utility-shape-label{fill:#6f8773;font:600 12px 'DM Sans',sans-serif;text-anchor:middle;pointer-events:none}
+.shape-resize-handle{fill:#fff;stroke:#4e8759;stroke-width:2;vector-effect:non-scaling-stroke;cursor:nwse-resize;pointer-events:all}
+.axis-tool-mark{padding:2px 4px;border:1px solid #dce7dc;border-radius:4px;color:#5f8065;font-size:10px;font-weight:700}
+@media(prefers-reduced-motion:reduce){.utility-shape polygon,.utility-shape rect{transition:none}}
+.coordinate-axes .axis-value{font-size:10px;font-weight:500;opacity:.8}
