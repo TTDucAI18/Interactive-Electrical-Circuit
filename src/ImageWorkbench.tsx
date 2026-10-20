@@ -238,14 +238,16 @@ function AnalysisProgress({ progress, elapsed, language }: { progress: ImageProg
       : progress.stage === 'response' ? t('progressResponse')
           : progress.stage === 'decoding' ? t('progressDecoding')
             : progress.reason === 'timeout' ? t('progressFallbackTimeout')
-              : progress.reason === 'network' ? t('progressFallbackNetwork') : t('progressFallback');
+              : progress.reason === 'network' ? t('progressFallbackNetwork')
+                : progress.reason === 'quota' ? t('progressFallbackQuota')
+                  : progress.reason === 'unavailable' ? t('progressFallbackUnavailable') : t('progressFallback');
   const determinate = progress.stage === 'uploading' && progress.percent !== undefined;
   return <div className="analysis-progress" role="status" aria-live="polite" aria-atomic="true">
     <div className="analysis-progress-heading"><LoaderCircle size={15} className="spin" /><strong>{message}</strong></div>
     <div className={`analysis-progress-track ${determinate ? 'determinate' : 'indeterminate'}`}>
       <span style={determinate ? { width: `${progress.percent}%` } : undefined} />
     </div>
-    <div className="analysis-progress-meta"><span>{progress.model ?? 'Gemini'} · {t('progressElapsed', { seconds: elapsed })}</span>{determinate && <b>{progress.percent}%</b>}</div>
+    <div className="analysis-progress-meta"><span>{progress.model ?? 'Gemini'}{progress.attempt && progress.totalModels ? ` · ${progress.attempt}/${progress.totalModels}` : ''} · {t('progressElapsed', { seconds: elapsed })}</span>{determinate && <b>{progress.percent}%</b>}</div>
   </div>;
 }
 
@@ -341,6 +343,7 @@ function localizeImageError(cause: unknown): Message {
   if (code === 'apiKeyRejected') return { key: 'workerKeyMissing' };
   if (code === 'quota') return { key: 'geminiQuota' };
   if (code === 'overloaded') return { key: 'geminiOverloaded' };
+  if (code === 'modelUnavailable') return { key: 'geminiModelUnavailable' };
   if (code === 'timeout') return { key: 'geminiTimeout' };
   if (code === 'api') return { key: 'workerError', params: { status: (cause as ImageApiError).status ?? '—' } };
   if (code === 'board') return { key: 'invalidBoardJson' };

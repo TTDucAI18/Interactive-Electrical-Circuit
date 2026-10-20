@@ -2,12 +2,16 @@ import { validateBoard, type BoardDocument, type BoardMode } from './board';
 import type { Language } from './i18n';
 import { GEMINI_PUBLIC_API_KEY } from './geminiPublicKey';
 
-const MODEL = 'gemini-3.8-flash';
-const FALLBACK_MODEL = 'gemini-3-flash-preview';
+const MODELS = [
+  'gemini-3.8-flash',
+  'gemini-3-flash-preview',
+  'gemini-3.6-flash',
+  'gemini-3.1-flash-lite',
+] as const;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 
-export type ImageProgress = { stage: 'preparing' | 'uploading' | 'waiting' | 'response' | 'decoding' | 'fallback'; model?: string; percent?: number; reason?: 'busy' | 'timeout' | 'network' };
-export type ImageApiErrorCode = 'apiKeyMissing' | 'invalidType' | 'tooLarge' | 'readFailed' | 'invalidImage' | 'apiKeyRejected' | 'quota' | 'overloaded' | 'timeout' | 'api' | 'board';
+export type ImageProgress = { stage: 'preparing' | 'uploading' | 'waiting' | 'response' | 'decoding' | 'fallback'; model?: string; percent?: number; attempt?: number; totalModels?: number; reason?: 'busy' | 'timeout' | 'network' | 'quota' | 'unavailable' };
+export type ImageApiErrorCode = 'apiKeyMissing' | 'invalidType' | 'tooLarge' | 'readFailed' | 'invalidImage' | 'apiKeyRejected' | 'quota' | 'overloaded' | 'modelUnavailable' | 'timeout' | 'api' | 'board';
 export class ImageApiError extends Error {
   constructor(public code: ImageApiErrorCode, public status?: number) { super(code); this.name = 'ImageApiError'; }
 }
@@ -35,21 +39,21 @@ export async function imageToBoard(file: File, mode: BoardMode, language: Langua
       generationConfig: { temperature: 0.1, responseMimeType: 'application/json' },
     });
     let fallbackReason: ImageProgress['reason'];
-    for (const [index, model] of [MODEL, FALLBACK_MODEL].entries()) {
-      if (index === 1) onProgress?.({ stage: 'fallback', model, reason: fallbackReason });
-      onProgress?.({ stage: 'uploading', model, percent: 0 });
+    for (const [index, model] of MODELS.entries()) {
+      if (index > 0) onProgress?.({ stage: 'fallback', model, attempt: index + 1, totalModels: MODELS.length, reason: fallbackReason });
+      onProgress?.({ stage: 'uploading', model, percent: 0, attempt: index + 1, totalModels: MODELS.length });
       try {
-        response = await sendToGemini(model, requestBody, onProgress);
+        response = await sendToGemini(model, requestBody, onProgress, index + 1, MODELS.length);
       } catch (cause) {
-        // A slow primary model must not prevent trying the known-good backup model.
-        if (index === 0 && cause instanceof ImageApiError && (cause.code === 'timeout' || cause.code === 'api')) {
+        // Try another available model when Google times out or the request fails.
+        if (index < MODELS.length - 1 && cause instanceof ImageApiError && (cause.code === 'timeout' || cause.code === 'api')) {
           fallbackReason = cause.code === 'timeout' ? 'timeout' : 'network';
           continue;
         }
         throw cause;
       }
-      if (response.status === 503 && index === 0) {
-        fallbackReason = 'busy';
+      if (index < MODELS.length - 1 && [404, 429, 503].includes(response.status)) {
+        fallbackReason = response.status === 404 ? 'unavailable' : response.status === 429 ? 'quota' : 'busy';
         continue;
       }
       break;
@@ -64,6 +68,7 @@ export async function imageToBoard(file: File, mode: BoardMode, language: Langua
     if (response.status === 429) throw new ImageApiError('quota', response.status);
     if (response.status === 401 || response.status === 403) throw new ImageApiError('apiKeyRejected', response.status);
     if (response.status === 503) throw new ImageApiError('overloaded', response.status);
+    if (response.status === 404) throw new ImageApiError('modelUnavailable', response.status);
     throw new ImageApiError('api', response.status);
   }
 
@@ -75,19 +80,20 @@ export async function imageToBoard(file: File, mode: BoardMode, language: Langua
   } catch { throw new ImageApiError('board'); }
 }
 
-function sendToGemini(model: string, body: string, onProgress?: (progress: ImageProgress) => void): Promise<{ status: number; payload: GeminiResponse | null }> {
+function sendToGemini(model: string, body: string, onProgress: ((progress: ImageProgress) => void) | undefined, attempt: number, totalModels: number): Promise<{ status: number; payload: GeminiResponse | null }> {
   return new Promise((resolve, reject) => {
     const request = new XMLHttpRequest();
+    const report = (progress: ImageProgress) => onProgress?.({ ...progress, attempt, totalModels });
     request.open('POST', `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`);
     request.setRequestHeader('Content-Type', 'application/json');
     request.setRequestHeader('x-goog-api-key', GEMINI_PUBLIC_API_KEY);
     request.timeout = 45_000;
     request.upload.addEventListener('progress', (event) => {
-      if (event.lengthComputable) onProgress?.({ stage: 'uploading', model, percent: Math.round(event.loaded / event.total * 100) });
+      if (event.lengthComputable) report({ stage: 'uploading', model, percent: Math.round(event.loaded / event.total * 100) });
     });
-    request.upload.addEventListener('load', () => onProgress?.({ stage: 'waiting', model }));
+    request.upload.addEventListener('load', () => report({ stage: 'waiting', model }));
     request.addEventListener('readystatechange', () => {
-      if (request.readyState === XMLHttpRequest.HEADERS_RECEIVED) onProgress?.({ stage: 'response', model });
+      if (request.readyState === XMLHttpRequest.HEADERS_RECEIVED) report({ stage: 'response', model });
     });
     request.addEventListener('load', () => {
       let payload: GeminiResponse | null = null;
