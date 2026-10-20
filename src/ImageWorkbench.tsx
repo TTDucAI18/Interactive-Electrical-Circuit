@@ -188,7 +188,6 @@ export default function ImageWorkbench({ language }: { language: Language }) {
         </button>
         {busy && progress && <AnalysisProgress progress={progress} elapsed={elapsed} language={language} />}
         <button className="open-json-button" onClick={() => jsonInput.current?.click()}><FileJson2 size={15} /> {t('openJson')}</button>
-        <div className="privacy-note"><CircleAlert size={15} /><span>{t('imagePrivacy')}</span></div>
         {error && <div className="image-message error" role="alert"><CircleAlert size={16} /><span>{t(error.key, error.params)}</span></div>}
         {success && <div className="image-message success" role="status"><Check size={16} /><span>{t(success.key, success.params)}</span></div>}
       </section>
@@ -236,8 +235,10 @@ function AnalysisProgress({ progress, elapsed, language }: { progress: ImageProg
   const message = progress.stage === 'preparing' ? t('progressPreparing')
     : progress.stage === 'uploading' ? t('progressUploading', { percent: progress.percent ?? 0 })
       : progress.stage === 'waiting' ? t('progressWaiting')
-        : progress.stage === 'response' ? t('progressResponse')
-          : progress.stage === 'decoding' ? t('progressDecoding') : t('progressFallback');
+      : progress.stage === 'response' ? t('progressResponse')
+          : progress.stage === 'decoding' ? t('progressDecoding')
+            : progress.reason === 'timeout' ? t('progressFallbackTimeout')
+              : progress.reason === 'network' ? t('progressFallbackNetwork') : t('progressFallback');
   const determinate = progress.stage === 'uploading' && progress.percent !== undefined;
   return <div className="analysis-progress" role="status" aria-live="polite" aria-atomic="true">
     <div className="analysis-progress-heading"><LoaderCircle size={15} className="spin" /><strong>{message}</strong></div>
@@ -339,6 +340,7 @@ function localizeImageError(cause: unknown): Message {
   if (code === 'invalidImage') return { key: 'invalidImage' };
   if (code === 'apiKeyRejected') return { key: 'workerKeyMissing' };
   if (code === 'quota') return { key: 'geminiQuota' };
+  if (code === 'overloaded') return { key: 'geminiOverloaded' };
   if (code === 'timeout') return { key: 'geminiTimeout' };
   if (code === 'api') return { key: 'workerError', params: { status: (cause as ImageApiError).status ?? '—' } };
   if (code === 'board') return { key: 'invalidBoardJson' };
