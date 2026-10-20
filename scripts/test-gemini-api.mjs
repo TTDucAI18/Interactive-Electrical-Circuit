@@ -83,10 +83,10 @@ async function readSecret() {
 
 async function makeRequestBody(options) {
   const simpleSchema = {
-    type: 'OBJECT',
+    type: 'object',
     properties: {
-      summary: { type: 'STRING' },
-      visibleObjects: { type: 'ARRAY', items: { type: 'STRING' } },
+      summary: { type: 'string' },
+      visibleObjects: { type: 'array', items: { type: 'string' } },
     },
     required: ['summary', 'visibleObjects'],
   };
@@ -94,7 +94,7 @@ async function makeRequestBody(options) {
   if (!options.imagePath) {
     return {
       contents: [{ role: 'user', parts: [{ text: 'Return a JSON object with summary set to exactly "GEMINI_API_OK" and visibleObjects set to an empty array.' }] }],
-      generationConfig: { thinkingConfig: { thinkingLevel: 'low' }, maxOutputTokens: 256, responseMimeType: 'application/json', responseSchema: simpleSchema },
+      generationConfig: { thinkingConfig: { thinkingLevel: 'low' }, maxOutputTokens: 256, responseMimeType: 'application/json', responseJsonSchema: simpleSchema },
     };
   }
 
@@ -103,62 +103,60 @@ async function makeRequestBody(options) {
   const mimeType = imageMimeTypes.get(extname(options.imagePath).toLowerCase());
   const componentTypes = ['resistor', 'capacitor', 'inductor', 'diode', 'led', 'transistor', 'ic', 'connector', 'switch', 'source', 'other'];
   const boardSchema = {
-    type: 'OBJECT',
+    type: 'object',
     properties: {
-      format: { type: 'STRING', enum: ['interactive-electrical-board'] },
-      // Gemini structured-output enums are string-only; validate the version after parsing.
-      version: { type: 'INTEGER' },
-      mode: { type: 'STRING', enum: ['schematic', 'pcb'] },
-      title: { type: 'STRING' }, summary: { type: 'STRING' },
-      width: { type: 'NUMBER', minimum: 1, maximum: 1000 }, height: { type: 'NUMBER', minimum: 1, maximum: 1000 },
-      components: { type: 'ARRAY', items: { type: 'OBJECT', properties: {
-        id: { type: 'STRING' }, reference: { type: 'STRING' }, type: { type: 'STRING', enum: componentTypes },
-        value: { type: 'STRING' }, unit: { type: 'STRING' },
-        x: { type: 'NUMBER', minimum: 0, maximum: 1000 }, y: { type: 'NUMBER', minimum: 0, maximum: 1000 },
-        rotation: { type: 'NUMBER', minimum: -360, maximum: 360 }, confidence: { type: 'NUMBER', minimum: 0, maximum: 1 },
-        pins: { type: 'ARRAY', items: { type: 'OBJECT', properties: {
-          id: { type: 'STRING' }, label: { type: 'STRING' },
-          x: { type: 'NUMBER', minimum: -250, maximum: 250 }, y: { type: 'NUMBER', minimum: -250, maximum: 250 },
+      format: { type: 'string', enum: ['interactive-electrical-board'] },
+      version: { type: 'integer' },
+      mode: { type: 'string', enum: ['schematic', 'pcb'] },
+      title: { type: 'string' }, summary: { type: 'string' },
+      width: { type: 'number', minimum: 1, maximum: 1000 }, height: { type: 'number', minimum: 1, maximum: 1000 },
+      components: { type: 'array', items: { type: 'object', properties: {
+        id: { type: 'string' }, reference: { type: 'string' }, type: { type: 'string', enum: componentTypes },
+        value: { type: 'string' }, unit: { type: 'string' },
+        x: { type: 'number', minimum: 0, maximum: 1000 }, y: { type: 'number', minimum: 0, maximum: 1000 },
+        rotation: { type: 'number', minimum: -360, maximum: 360 }, confidence: { type: 'number', minimum: 0, maximum: 1 },
+        pins: { type: 'array', items: { type: 'object', properties: {
+          id: { type: 'string' }, label: { type: 'string' },
+          x: { type: 'number', minimum: -250, maximum: 250 }, y: { type: 'number', minimum: -250, maximum: 250 },
         }, required: ['id', 'label', 'x', 'y'] } },
       }, required: ['id', 'reference', 'type', 'value', 'unit', 'x', 'y', 'rotation', 'confidence', 'pins'] } },
-      nodes: { type: 'ARRAY', items: { type: 'OBJECT', properties: {
-        id: { type: 'STRING' }, label: { type: 'STRING' },
-        x: { type: 'NUMBER', minimum: 0, maximum: 1000 }, y: { type: 'NUMBER', minimum: 0, maximum: 1000 },
-        confidence: { type: 'NUMBER', minimum: 0, maximum: 1 },
+      nodes: { type: 'array', items: { type: 'object', properties: {
+        id: { type: 'string' }, label: { type: 'string' },
+        x: { type: 'number', minimum: 0, maximum: 1000 }, y: { type: 'number', minimum: 0, maximum: 1000 },
+        confidence: { type: 'number', minimum: 0, maximum: 1 },
       }, required: ['id', 'label', 'x', 'y', 'confidence'] } },
-      connections: { type: 'ARRAY', items: { type: 'OBJECT', properties: {
-        id: { type: 'STRING' }, componentId: { type: 'STRING' }, pinId: { type: 'STRING' }, nodeId: { type: 'STRING' },
-        confidence: { type: 'NUMBER', minimum: 0, maximum: 1 },
+      connections: { type: 'array', items: { type: 'object', properties: {
+        id: { type: 'string' }, componentId: { type: 'string' }, pinId: { type: 'string' }, nodeId: { type: 'string' },
+        confidence: { type: 'number', minimum: 0, maximum: 1 },
       }, required: ['id', 'componentId', 'pinId', 'nodeId', 'confidence'] } },
-      traces: { type: 'ARRAY', items: { type: 'OBJECT', properties: {
-        id: { type: 'STRING' }, layer: { type: 'STRING', enum: ['top', 'bottom', 'unknown'] },
-        confidence: { type: 'NUMBER', minimum: 0, maximum: 1 },
-        points: { type: 'ARRAY', items: { type: 'OBJECT', properties: {
-          x: { type: 'NUMBER', minimum: 0, maximum: 1000 }, y: { type: 'NUMBER', minimum: 0, maximum: 1000 },
+      traces: { type: 'array', items: { type: 'object', properties: {
+        id: { type: 'string' }, layer: { type: 'string', enum: ['top', 'bottom', 'unknown'] },
+        confidence: { type: 'number', minimum: 0, maximum: 1 },
+        points: { type: 'array', items: { type: 'object', properties: {
+          x: { type: 'number', minimum: 0, maximum: 1000 }, y: { type: 'number', minimum: 0, maximum: 1000 },
         }, required: ['x', 'y'] } },
       }, required: ['id', 'layer', 'confidence', 'points'] } },
-      notes: { type: 'ARRAY', items: { type: 'STRING' } },
+      notes: { type: 'array', items: { type: 'string' } },
     },
     required: ['format', 'version', 'mode', 'title', 'summary', 'width', 'height', 'components', 'nodes', 'connections', 'traces', 'notes'],
   };
   const task = options.mode === 'pcb'
     ? 'Analyze this physical PCB image. Extract visible components and only copper traces clearly visible in the photo. Never infer hidden layers, vias, or electrical connections that cannot be followed visually.'
     : 'Analyze this circuit schematic. Extract component symbols, readable designators and values, pin positions, junction nodes, and only connections supported by visible wire continuity. Treat uninterrupted wire as the same electrical node, including labeled points along that wire. Do not invent unclear labels, values, components, or connections.';
-  const prompt = `${task} Return only board JSON matching the schema. Use a 0-1000 coordinate system. Set format to "interactive-electrical-board", version 1, and mode to "${options.mode}". Use stable unique IDs. For unreadable component values or labels, use an empty string and add a concise note. Include confidence from 0 to 1. If this is not the requested image type, return empty components, nodes, connections, and traces arrays and explain why in notes.`;
+  const prompt = `${task} Return only board JSON matching the schema. Use a 0-1000 coordinate system. Pin x/y are offsets from the component center, not board coordinates. Each component pin may connect to at most one node. Set format to "interactive-electrical-board", version 1, and mode to "${options.mode}". Use stable unique IDs. For unreadable component values or labels, use an empty string and add a concise note. Include confidence from 0 to 1. If this is not the requested image type, return empty components, nodes, connections, and traces arrays and explain why in notes.`;
 
   return {
     contents: [{ role: 'user', parts: [
       { text: prompt },
       { inlineData: { mimeType, data: image.toString('base64') } },
     ] }],
-    generationConfig: { thinkingConfig: { thinkingLevel: 'low' }, maxOutputTokens: 8192, responseMimeType: 'application/json', responseSchema: boardSchema },
+    generationConfig: { thinkingConfig: { thinkingLevel: 'low' }, maxOutputTokens: 8192, responseMimeType: 'application/json', responseJsonSchema: boardSchema },
   };
 }
 
 function getApiError(body, key) {
-  const message = body?.error?.message;
-  if (typeof message !== 'string') return 'Google returned an error without a readable message.';
-  return message.split(key).join('[redacted]').replace(/[\r\n]+/g, ' ').slice(0, 500);
+  if (!body?.error || typeof body.error !== 'object') return 'Google returned an error without a readable message.';
+  return JSON.stringify(body.error).split(key).join('[redacted]').replace(/[\r\n]+/g, ' ').slice(0, 1500);
 }
 
 async function main() {

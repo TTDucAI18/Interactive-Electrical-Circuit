@@ -346,7 +346,7 @@ function localizeImageError(cause: unknown): Message {
   if (code === 'modelUnavailable') return { key: 'geminiModelUnavailable' };
   if (code === 'timeout') return { key: 'geminiTimeout' };
   if (code === 'api') return { key: 'workerError', params: { status: (cause as ImageApiError).status ?? '—' } };
-  if (code === 'board') return { key: 'invalidBoardJson' };
+  if (code === 'board') return { key: 'invalidGeminiBoard' };
   return { key: 'imageUnknownError' };
 }
 

@@ -162,6 +162,76 @@ export function validateBoard(value: unknown, expectedMode?: BoardMode): BoardDo
   };
 }
 
+/** Repairs safe, non-electrical response defects before strict validation. Ambiguous pins are left unconnected. */
+export function normalizeRecognizedBoard(value: unknown, expectedMode: BoardMode, repairNote: string): BoardDocument {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return validateBoard(value, expectedMode);
+  const raw = value as Record<string, unknown>;
+  if (!Array.isArray(raw.components) || !Array.isArray(raw.nodes) || !Array.isArray(raw.connections)) return validateBoard(value, expectedMode);
+
+  const pins = new Set<string>();
+  for (const item of raw.components) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const component = item as Record<string, unknown>;
+    if (typeof component.id !== 'string' || !Array.isArray(component.pins)) continue;
+    for (const pin of component.pins) {
+      if (!pin || typeof pin !== 'object' || Array.isArray(pin)) continue;
+      const pinId = (pin as Record<string, unknown>).id;
+      if (typeof pinId === 'string') pins.add(`${component.id.trim()}:${pinId.trim()}`);
+    }
+  }
+  const nodeIds = new Set(raw.nodes.flatMap((item) => item && typeof item === 'object' && !Array.isArray(item) && typeof (item as Record<string, unknown>).id === 'string' ? [(item as Record<string, string>).id.trim()] : []));
+  const groups = new Map<string, Array<{ index: number; nodeId: string }>>();
+  const discard = new Set<number>();
+  let repaired = false;
+
+  raw.connections.forEach((item, index) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return;
+    const edge = item as Record<string, unknown>;
+    if (typeof edge.componentId !== 'string' || typeof edge.pinId !== 'string' || typeof edge.nodeId !== 'string') return;
+    const pinKey = `${edge.componentId.trim()}:${edge.pinId.trim()}`;
+    const nodeId = edge.nodeId.trim();
+    if (!pins.has(pinKey) || !nodeIds.has(nodeId)) {
+      discard.add(index);
+      repaired = true;
+      return;
+    }
+    const group = groups.get(pinKey) ?? [];
+    group.push({ index, nodeId });
+    groups.set(pinKey, group);
+  });
+
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+    const nodeChoices = new Set(group.map((entry) => entry.nodeId));
+    // Never guess which net is correct when the model assigns one pin to multiple nodes.
+    const toDiscard = nodeChoices.size > 1 ? group : group.slice(1);
+    for (const entry of toDiscard) discard.add(entry.index);
+    repaired = true;
+  }
+
+  const connectionIds = new Set<string>();
+  const connections = raw.connections.flatMap((item, index) => {
+    if (discard.has(index)) return [];
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return [item];
+    const edge = { ...(item as Record<string, unknown>) };
+    const existingId = typeof edge.id === 'string' ? edge.id.trim() : '';
+    let id = existingId;
+    if (!id || connectionIds.has(id)) {
+      let number = index + 1;
+      id = `ai-connection-${number}`;
+      while (connectionIds.has(id)) id = `ai-connection-${++number}`;
+      repaired = true;
+    }
+    connectionIds.add(id);
+    edge.id = id;
+    return [edge];
+  });
+
+  const notes = Array.isArray(raw.notes) ? raw.notes.filter((note): note is string => typeof note === 'string') : [];
+  if (repaired && repairNote && !notes.includes(repairNote)) notes.unshift(repairNote);
+  return validateBoard({ ...raw, connections, notes: notes.slice(0, 30) }, expectedMode);
+}
+
 export function updateBoardComponent(board: BoardDocument, componentId: string, patch: Partial<Pick<BoardComponent, 'reference' | 'type' | 'value' | 'unit' | 'x' | 'y' | 'rotation'>>): BoardDocument {
   return { ...board, components: board.components.map((part) => part.id === componentId ? { ...part, ...patch } : part) };
 }
