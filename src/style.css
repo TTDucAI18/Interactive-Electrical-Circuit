@@ -104,3 +104,30 @@ body{font-size:14px}.topbar{height:auto;min-height:72px;gap:14px}.topbar-end{dis
 .route-reset-button{min-height:39px;padding:0 10px;border:1px solid #dce7dc;border-radius:7px;background:#f8fbf7;color:#55765d;font:600 13px 'DM Sans',sans-serif;display:flex;align-items:center;justify-content:center;gap:7px;cursor:pointer}
 .route-reset-button:hover,.canvas-help .cancel-placement:hover{background:#eaf3eb}
 @media(max-width:700px){.magnet-toggle{gap:5px}.magnet-toggle small{font-size:9px}.canvas-help{flex-wrap:wrap}.canvas-help .cancel-placement{min-height:34px}.wire-route-hit{stroke-width:30}}
+
+/* Live Gemini request progress and playful unlock reveal. */
+.analysis-progress{margin-top:10px;padding:11px 12px;border:1px solid #dce9dd;border-radius:8px;background:linear-gradient(145deg,#f8fbf7,#f3f8f2);color:#56745b}
+.analysis-progress-heading{display:flex;align-items:flex-start;gap:8px;font-size:11px;line-height:1.45}
+.analysis-progress-heading svg{flex:none;margin-top:1px;color:#5f9568}
+.analysis-progress-heading strong{font-weight:600}
+.analysis-progress-track{height:6px;margin-top:10px;overflow:hidden;border-radius:99px;background:#e0e9df}
+.analysis-progress-track>span{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#70a77b,#4c895e);transition:width .18s ease}
+.analysis-progress-track.indeterminate>span{width:38%;animation:progress-sweep 1.25s ease-in-out infinite alternate}
+.analysis-progress-meta{display:flex;justify-content:space-between;gap:8px;margin-top:6px;color:#829087;font-size:9px}
+.analysis-progress-meta b{color:#4e8059;font-variant-numeric:tabular-nums}
+@keyframes progress-sweep{from{transform:translateX(-8%)}to{transform:translateX(175%)}}
+.prank-paywall-backdrop{position:fixed;inset:0;z-index:10000;display:grid;place-items:center;padding:18px;background:rgba(24,35,27,.28);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);animation:paywall-fade .22s ease-out}
+.prank-paywall{width:min(360px,100%);padding:27px 25px 21px;border:1px solid rgba(255,255,255,.8);border-radius:20px;background:linear-gradient(155deg,#fff 0%,#f5faf4 100%);box-shadow:0 24px 80px rgba(20,38,24,.25);text-align:center;animation:paywall-pop .32s cubic-bezier(.2,.8,.2,1)}
+.prank-smile{width:54px;height:54px;margin:0 auto 10px;display:grid;place-items:center;border-radius:17px;background:#e7f4e7;color:#57835f;transform:rotate(-7deg)}
+.prank-kicker{color:#93a194;font:700 9px 'DM Sans',sans-serif;letter-spacing:.16em}
+.prank-paywall h2{margin:7px 0 5px;color:#2e3d32;font:700 22px Manrope,sans-serif;letter-spacing:-.04em}
+.prank-paywall p{margin:0;color:#68786b;font-size:13px}
+.prank-paywall button{width:100%;min-height:47px;margin-top:18px;border:0;border-radius:10px;background:#4e855d;color:#fff;font:700 13px 'DM Sans',sans-serif;cursor:pointer;box-shadow:0 5px 14px rgba(65,122,78,.2);transition:transform .15s,background .15s}
+.prank-paywall button:hover{background:#3f754f;transform:translateY(-1px)}
+.prank-paywall button span{margin-left:4px}
+.prank-paywall small{display:block;margin-top:11px;color:#98a198;font-size:10px}
+.just-kidding-toast{position:fixed;top:20px;left:50%;z-index:10001;display:flex;align-items:center;gap:9px;padding:13px 20px;border:1px solid #d8e9d8;border-radius:999px;background:#fff;color:#42774f;box-shadow:0 10px 35px rgba(30,52,34,.18);font:700 16px Manrope,sans-serif;transform:translateX(-50%);animation:paywall-pop .25s ease-out}
+@keyframes paywall-fade{from{opacity:0}to{opacity:1}}
+@keyframes paywall-pop{from{opacity:0;transform:translateY(8px) scale(.96)}to{opacity:1;transform:translateY(0) scale(1)}}
+@media(max-width:520px){.analysis-progress{padding:10px}.prank-paywall{padding:24px 20px 18px}.prank-paywall h2{font-size:20px}.just-kidding-toast{top:12px;font-size:15px}}
+@media(prefers-reduced-motion:reduce){.analysis-progress-track.indeterminate>span,.prank-paywall-backdrop,.prank-paywall,.just-kidding-toast{animation:none}}

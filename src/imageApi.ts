@@ -6,7 +6,8 @@ const MODEL = 'gemini-3.8-flash';
 const FALLBACK_MODEL = 'gemini-3-flash-preview';
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 
-export type ImageApiErrorCode = 'apiKeyMissing' | 'invalidType' | 'tooLarge' | 'readFailed' | 'invalidImage' | 'apiKeyRejected' | 'quota' | 'api' | 'board';
+export type ImageProgress = { stage: 'preparing' | 'uploading' | 'waiting' | 'response' | 'decoding' | 'fallback'; model?: string; percent?: number };
+export type ImageApiErrorCode = 'apiKeyMissing' | 'invalidType' | 'tooLarge' | 'readFailed' | 'invalidImage' | 'apiKeyRejected' | 'quota' | 'timeout' | 'api' | 'board';
 export class ImageApiError extends Error {
   constructor(public code: ImageApiErrorCode, public status?: number) { super(code); this.name = 'ImageApiError'; }
 }
@@ -16,14 +17,15 @@ type GeminiResponse = {
   candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
 };
 
-export async function imageToBoard(file: File, mode: BoardMode, language: Language): Promise<BoardDocument> {
+export async function imageToBoard(file: File, mode: BoardMode, language: Language, onProgress?: (progress: ImageProgress) => void): Promise<BoardDocument> {
   if (!GEMINI_PUBLIC_API_KEY) throw new ImageApiError('apiKeyMissing');
   if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) throw new ImageApiError('invalidType');
   if (file.size > MAX_IMAGE_BYTES) throw new ImageApiError('tooLarge');
+  onProgress?.({ stage: 'preparing' });
   const imageData = await fileToDataUrl(file);
   const base64 = imageData.slice(imageData.indexOf(',') + 1);
 
-  let response: Response | undefined;
+  let response: { status: number; payload: GeminiResponse | null } | undefined;
   try {
     const requestBody = JSON.stringify({
       contents: [{ role: 'user', parts: [
@@ -33,28 +35,55 @@ export async function imageToBoard(file: File, mode: BoardMode, language: Langua
       generationConfig: { temperature: 0.1, responseMimeType: 'application/json' },
     });
     for (const [index, model] of [MODEL, FALLBACK_MODEL].entries()) {
-      response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GEMINI_PUBLIC_API_KEY },
-        body: requestBody,
-      });
+      if (index === 1) onProgress?.({ stage: 'fallback', model });
+      onProgress?.({ stage: 'uploading', model, percent: 0 });
+      response = await sendToGemini(model, requestBody, onProgress);
       if (response.status !== 503 || index === 1) break;
     }
-  } catch { throw new ImageApiError('api'); }
+  } catch (cause) {
+    if (cause instanceof ImageApiError) throw cause;
+    throw new ImageApiError('api');
+  }
 
   if (!response) throw new ImageApiError('api');
-  const payload = await response.json().catch(() => null) as GeminiResponse | null;
-  if (!response.ok) {
+  if (response.status < 200 || response.status >= 300) {
     if (response.status === 429) throw new ImageApiError('quota', response.status);
     if (response.status === 401 || response.status === 403) throw new ImageApiError('apiKeyRejected', response.status);
     throw new ImageApiError('api', response.status);
   }
 
-  const generated = payload?.candidates?.[0]?.content?.parts?.map((part) => part.text ?? '').join('').trim();
+  onProgress?.({ stage: 'decoding' });
+  const generated = response.payload?.candidates?.[0]?.content?.parts?.map((part) => part.text ?? '').join('').trim();
   if (!generated) throw new ImageApiError('board');
   try {
     return validateBoard(JSON.parse(generated), mode);
   } catch { throw new ImageApiError('board'); }
+}
+
+function sendToGemini(model: string, body: string, onProgress?: (progress: ImageProgress) => void): Promise<{ status: number; payload: GeminiResponse | null }> {
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open('POST', `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`);
+    request.setRequestHeader('Content-Type', 'application/json');
+    request.setRequestHeader('x-goog-api-key', GEMINI_PUBLIC_API_KEY);
+    request.timeout = 90_000;
+    request.upload.addEventListener('progress', (event) => {
+      if (event.lengthComputable) onProgress?.({ stage: 'uploading', model, percent: Math.round(event.loaded / event.total * 100) });
+    });
+    request.upload.addEventListener('load', () => onProgress?.({ stage: 'waiting', model }));
+    request.addEventListener('readystatechange', () => {
+      if (request.readyState === XMLHttpRequest.HEADERS_RECEIVED) onProgress?.({ stage: 'response', model });
+    });
+    request.addEventListener('load', () => {
+      let payload: GeminiResponse | null = null;
+      try { payload = JSON.parse(request.responseText) as GeminiResponse; } catch { /* handled as an invalid response below */ }
+      resolve({ status: request.status, payload });
+    });
+    request.addEventListener('error', () => reject(new ImageApiError('api')));
+    request.addEventListener('timeout', () => reject(new ImageApiError('timeout')));
+    request.addEventListener('abort', () => reject(new ImageApiError('api')));
+    request.send(body);
+  });
 }
 
 function fileToDataUrl(file: File): Promise<string> {

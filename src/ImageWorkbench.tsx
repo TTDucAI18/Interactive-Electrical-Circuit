@@ -1,6 +1,6 @@
-import { useRef, useState, type PointerEvent } from 'react';
-import { ArrowLeft, Check, CircleAlert, Download, FileJson2, ImagePlus, LoaderCircle, Plus, Trash2, Upload, X } from 'lucide-react';
-import { imageToBoard, type ImageApiError } from './imageApi';
+import { useEffect, useRef, useState, type PointerEvent } from 'react';
+import { ArrowLeft, Check, CircleAlert, Download, FileJson2, ImagePlus, LoaderCircle, Plus, Smile, Trash2, Upload, X } from 'lucide-react';
+import { imageToBoard, type ImageApiError, type ImageProgress } from './imageApi';
 import { updateBoardComponent, validateBoard, type BoardComponent, type BoardDocument, type BoardMode } from './board';
 import { translate, type Language } from './i18n';
 
@@ -14,10 +14,24 @@ export default function ImageWorkbench({ language }: { language: Language }) {
   const [board, setBoard] = useState<BoardDocument | null>(null);
   const [selected, setSelected] = useState('');
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<ImageProgress | null>(null);
+  const [elapsed, setElapsed] = useState(0);
+  const [showPrankPaywall, setShowPrankPaywall] = useState(false);
+  const [showJustKidding, setShowJustKidding] = useState(false);
   const [error, setError] = useState<Message | null>(null);
   const [success, setSuccess] = useState<Message | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const jsonInput = useRef<HTMLInputElement>(null);
+  const kiddingTimer = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!busy) { setElapsed(0); return; }
+    const startedAt = Date.now();
+    const timer = window.setInterval(() => setElapsed(Math.floor((Date.now() - startedAt) / 1000)), 250);
+    return () => window.clearInterval(timer);
+  }, [busy]);
+
+  useEffect(() => () => { if (kiddingTimer.current !== null) window.clearTimeout(kiddingTimer.current); }, []);
 
   const chooseImage = (next: File | undefined) => {
     if (!next) return;
@@ -29,19 +43,30 @@ export default function ImageWorkbench({ language }: { language: Language }) {
     setBoard(null);
     setError(null);
     setSuccess(null);
+    setProgress(null);
+    setShowPrankPaywall(false);
+    setShowJustKidding(false);
   };
 
   const parseImage = async () => {
     if (!file) { setError({ key: 'chooseFirst' }); return; }
-    setBusy(true); setError(null); setSuccess(null); setBoard(null);
+    setBusy(true); setProgress(null); setError(null); setSuccess(null); setBoard(null); setShowPrankPaywall(false); setShowJustKidding(false);
     try {
-      const extracted = await imageToBoard(file, mode, language);
+      const extracted = await imageToBoard(file, mode, language, setProgress);
       setBoard(extracted);
       setSelected(extracted.components[0]?.id ?? '');
       setSuccess({ key: 'imageSuccess' });
+      setShowPrankPaywall(true);
     } catch (cause) {
       setError(localizeImageError(cause));
-    } finally { setBusy(false); }
+    } finally { setBusy(false); setProgress(null); }
+  };
+
+  const revealBoard = () => {
+    setShowPrankPaywall(false);
+    setShowJustKidding(true);
+    if (kiddingTimer.current !== null) window.clearTimeout(kiddingTimer.current);
+    kiddingTimer.current = window.setTimeout(() => setShowJustKidding(false), 3000);
   };
 
   const importJson = async (next: File | undefined) => {
@@ -49,7 +74,7 @@ export default function ImageWorkbench({ language }: { language: Language }) {
     try {
       const parsed: unknown = JSON.parse(await next.text());
       const imported = validateBoard(parsed);
-      setBoard(imported); setMode(imported.mode); setFile(null); setPreview(''); setSelected(imported.components[0]?.id ?? ''); setError(null); setSuccess({ key: 'boardOpened' });
+      setBoard(imported); setMode(imported.mode); setFile(null); setPreview(''); setSelected(imported.components[0]?.id ?? ''); setError(null); setSuccess({ key: 'boardOpened' }); setShowPrankPaywall(false); setShowJustKidding(false);
     } catch { setError({ key: 'invalidBoardJson' }); }
     if (jsonInput.current) jsonInput.current.value = '';
   };
@@ -137,7 +162,7 @@ export default function ImageWorkbench({ language }: { language: Language }) {
   };
   const resetUpload = () => {
     if (preview) URL.revokeObjectURL(preview);
-    setFile(null); setPreview(''); setBoard(null); setError(null); setSuccess(null);
+    setFile(null); setPreview(''); setBoard(null); setError(null); setSuccess(null); setProgress(null); setShowPrankPaywall(false); setShowJustKidding(false);
   };
 
   return <main className="image-workbench">
@@ -161,6 +186,7 @@ export default function ImageWorkbench({ language }: { language: Language }) {
         <button className="analyze-button" onClick={() => void parseImage()} disabled={!file || busy}>
           {busy ? <><LoaderCircle size={16} className="spin" /> {t('analyzing')}</> : <><ImagePlus size={16} /> {t('analyze')}</>}
         </button>
+        {busy && progress && <AnalysisProgress progress={progress} elapsed={elapsed} language={language} />}
         <button className="open-json-button" onClick={() => jsonInput.current?.click()}><FileJson2 size={15} /> {t('openJson')}</button>
         <div className="privacy-note"><CircleAlert size={15} /><span>{t('imagePrivacy')}</span></div>
         {error && <div className="image-message error" role="alert"><CircleAlert size={16} /><span>{t(error.key, error.params)}</span></div>}
@@ -191,7 +217,35 @@ export default function ImageWorkbench({ language }: { language: Language }) {
     </section>}
     {board?.mode === 'schematic' && <ConnectionsPanel board={board} language={language} onConnectionChange={updateConnection} onAddNode={addNode} onNodeChange={updateNode} />}
     <footer className="page-footer image-footer"><span>{t('confidenceReview')}</span><span>{t('noApiKey')}</span></footer>
+    {showJustKidding && <div className="just-kidding-toast" role="status"><Smile size={19} /> {t('prankJustKidding')}</div>}
+    {showPrankPaywall && <div className="prank-paywall-backdrop">
+      <section className="prank-paywall" role="dialog" aria-modal="true" aria-labelledby="prank-paywall-title">
+        <span className="prank-smile"><Smile size={27} /></span>
+        <span className="prank-kicker">GEMINI BOARD</span>
+        <h2 id="prank-paywall-title">{t('prankTitle')}</h2>
+        <p>{t('prankOffer')}</p>
+        <button onClick={revealBoard}>{t('prankButton')} <span aria-hidden="true">🙂</span></button>
+        <small>{t('prankDisclaimer')}</small>
+      </section>
+    </div>}
   </main>;
+}
+
+function AnalysisProgress({ progress, elapsed, language }: { progress: ImageProgress; elapsed: number; language: Language }) {
+  const t = (key: Parameters<typeof translate>[1], params?: Record<string, string | number>) => translate(language, key, params);
+  const message = progress.stage === 'preparing' ? t('progressPreparing')
+    : progress.stage === 'uploading' ? t('progressUploading', { percent: progress.percent ?? 0 })
+      : progress.stage === 'waiting' ? t('progressWaiting')
+        : progress.stage === 'response' ? t('progressResponse')
+          : progress.stage === 'decoding' ? t('progressDecoding') : t('progressFallback');
+  const determinate = progress.stage === 'uploading' && progress.percent !== undefined;
+  return <div className="analysis-progress" role="status" aria-live="polite" aria-atomic="true">
+    <div className="analysis-progress-heading"><LoaderCircle size={15} className="spin" /><strong>{message}</strong></div>
+    <div className={`analysis-progress-track ${determinate ? 'determinate' : 'indeterminate'}`}>
+      <span style={determinate ? { width: `${progress.percent}%` } : undefined} />
+    </div>
+    <div className="analysis-progress-meta"><span>{progress.model ?? 'Gemini'} · {t('progressElapsed', { seconds: elapsed })}</span>{determinate && <b>{progress.percent}%</b>}</div>
+  </div>;
 }
 
 function BoardCanvas({ board, selected, onSelect, onMove, language }: { board: BoardDocument; selected: string; onSelect: (id: string) => void; onMove: (id: string, x: number, y: number) => void; language: Language }) {
@@ -285,6 +339,7 @@ function localizeImageError(cause: unknown): Message {
   if (code === 'invalidImage') return { key: 'invalidImage' };
   if (code === 'apiKeyRejected') return { key: 'workerKeyMissing' };
   if (code === 'quota') return { key: 'geminiQuota' };
+  if (code === 'timeout') return { key: 'geminiTimeout' };
   if (code === 'api') return { key: 'workerError', params: { status: (cause as ImageApiError).status ?? '—' } };
   if (code === 'board') return { key: 'invalidBoardJson' };
   return { key: 'imageUnknownError' };
