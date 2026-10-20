@@ -31,7 +31,7 @@ jobs:
         run: npm test
       - name: Build site
         env:
-          VITE_IMAGE_TO_BOARD_API_URL: ${{ vars.IMAGE_TO_BOARD_API_URL }}
+          VITE_GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: npm run build
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

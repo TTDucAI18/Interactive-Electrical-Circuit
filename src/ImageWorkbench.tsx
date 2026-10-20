@@ -278,13 +278,14 @@ function Confidence({ value }: { value: number }) {
 
 function localizeImageError(cause: unknown): Message {
   const code = (cause as Partial<ImageApiError>)?.code;
-  if (code === 'workerConfig') return { key: 'missingWorker' };
+  if (code === 'apiKeyMissing') return { key: 'missingWorker' };
   if (code === 'invalidType') return { key: 'invalidImageType' };
   if (code === 'tooLarge') return { key: 'tooLarge' };
   if (code === 'readFailed') return { key: 'readFailed' };
   if (code === 'invalidImage') return { key: 'invalidImage' };
-  if (code === 'worker' && (cause as ImageApiError).status === 503) return { key: 'workerKeyMissing' };
-  if (code === 'worker') return { key: 'workerError', params: { status: (cause as ImageApiError).status ?? '—' } };
+  if (code === 'apiKeyRejected') return { key: 'workerKeyMissing' };
+  if (code === 'quota') return { key: 'geminiQuota' };
+  if (code === 'api') return { key: 'workerError', params: { status: (cause as ImageApiError).status ?? '—' } };
   if (code === 'board') return { key: 'invalidBoardJson' };
   return { key: 'imageUnknownError' };
 }
