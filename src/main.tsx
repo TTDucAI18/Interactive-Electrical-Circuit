@@ -126,7 +126,7 @@ function App() {
   const addComponent = (kind: ComponentKind, position?: Point) => {
     const nextIndex = circuit.components.length;
     const positionToUse = position ?? { x: 130 + (nextIndex % 7) * 120, y: 430 + Math.floor(nextIndex / 7) * 70 };
-    const point = position ? snapCircuitPoint(circuit, position, undefined, 28, Math.max(5, 14 / zoom), magnetSnap, componentScale).position : clampPoint(positionToUse);
+    const point = position ? snapCircuitPoint(circuit, position, undefined, 20, Math.max(5, 14 / zoom), magnetSnap, componentScale).position : clampPoint(positionToUse);
     const prefix = kind === 'VAC' ? 'V' : kind === 'GND' ? 'GND' : kind;
     const count = circuit.components.filter((part) => part.kind === kind).length + 1;
     const component: CircuitComponent = { id: newId(kind.toLowerCase()), label: `${prefix}${count}`, kind, x: point.x, y: point.y, value: kind === 'VAC' ? 24 : kind === 'R' ? 10 : kind === 'L' ? 10 : kind === 'C' ? 100 : 0, rotation: kind === 'GND' ? 0 : 0, phase: 0, switchClosed: true };
@@ -138,7 +138,7 @@ function App() {
   const addJunction = (position?: Point) => {
     const nextIndex = circuit.nodes.length;
     const positionToUse = position ?? { x: 130 + (nextIndex % 7) * 120, y: 560 };
-    const point = position ? snapCircuitPoint(circuit, position, undefined, 28, Math.max(5, 14 / zoom), magnetSnap, componentScale).position : clampPoint(positionToUse);
+    const point = position ? snapCircuitPoint(circuit, position, undefined, 20, Math.max(5, 14 / zoom), magnetSnap, componentScale).position : clampPoint(positionToUse);
     const junction: CircuitNode = { id: newId('node'), label: `N${circuit.nodes.length + 1}`, ...point };
     pushUndo(circuit); setCircuit((current) => ({ ...current, nodes: [...current.nodes, junction] }));
     setSelected({ kind: 'node', id: junction.id });
@@ -269,7 +269,7 @@ function App() {
       const unsnapped = activeRouteDrag.axis === 'x'
         ? { x: point.x, y: from.y }
         : { x: from.x, y: point.y };
-      const snapped = snapCircuitPoint(circuit, unsnapped, undefined, 28, Math.max(5, 14 / zoom), magnetSnap, componentScale);
+      const snapped = snapCircuitPoint(circuit, unsnapped, undefined, 20, Math.max(5, 14 / zoom), magnetSnap, componentScale);
       const coordinate = snapped.position[activeRouteDrag.axis];
       setGuides(activeRouteDrag.axis === 'x' ? { x: snapped.guides.x } : { y: snapped.guides.y });
       if (Math.abs(previousCoordinate - coordinate) < 1) return;
@@ -279,7 +279,7 @@ function App() {
     }
     const activeDrag = drag.current;
     if (!activeDrag) return;
-    const snapped = snapCircuitPoint(circuit, { x: point.x - activeDrag.offset.x, y: point.y - activeDrag.offset.y }, activeDrag, 28, Math.max(5, 14 / zoom), magnetSnap, componentScale);
+    const snapped = snapCircuitPoint(circuit, { x: point.x - activeDrag.offset.x, y: point.y - activeDrag.offset.y }, activeDrag, 20, Math.max(5, 14 / zoom), magnetSnap, componentScale);
     setGuides(snapped.guides);
     const currentItem = activeDrag.kind === 'component' ? circuit.components.find((item) => item.id === activeDrag.id) : circuit.nodes.find((item) => item.id === activeDrag.id);
     if (!currentItem || (currentItem.x === snapped.position.x && currentItem.y === snapped.position.y)) return;
@@ -523,7 +523,7 @@ function CircuitCanvas({ circuit, selected, hovered = null, language, svgRef, wi
   const previewStart = wireStart ? pointOf(wireStart) : null;
   const displayValue = (part: CircuitComponent) => part.kind === 'R' ? `${part.value} Ω` : part.kind === 'L' ? `${part.value} mH` : part.kind === 'C' ? `${part.value} µF` : part.kind === 'VAC' ? `${part.value} V` : part.kind === 'SW' ? (part.switchClosed ? t('closed') : t('open')) : '';
   return <svg ref={svgRef} className={`circuit-svg ${readOnly ? 'read-only' : ''}`} viewBox="0 0 1000 700" role="img" aria-label={t('canvasTitle')} onPointerDown={readOnly ? undefined : onPointerDown} onPointerMove={readOnly ? undefined : onPointerMove} onPointerUp={readOnly ? undefined : onPointerUp} onPointerCancel={readOnly ? undefined : onPointerUp} onPointerLeave={readOnly ? undefined : () => onHover?.(null)} onWheel={readOnly ? undefined : onWheel}>
-    <defs><pattern id={readOnly ? 'print-grid' : 'editor-grid'} width="28" height="28" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1.5" fill="#e5eae4" /></pattern></defs>
+    <defs><pattern id={readOnly ? 'print-grid' : 'editor-grid'} width="20" height="20" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1.5" fill="#e5eae4" /></pattern></defs>
     <g transform={`translate(500 350) scale(${zoom}) translate(-500 -350)`}>
     <rect width="1000" height="700" rx="16" fill={`url(#${readOnly ? 'print-grid' : 'editor-grid'})`} />
     {guides.x !== undefined && <line className="alignment-guide" x1={guides.x} x2={guides.x} y1="0" y2="700" />}

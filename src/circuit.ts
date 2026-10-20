@@ -340,7 +340,7 @@ export function snapCircuitPoint(
   circuit: CircuitDocument,
   point: Point,
   moving?: { kind: 'component' | 'node'; id: string },
-  grid = 28,
+  grid = 20,
   tolerance = 12,
   enabled = true,
   componentScale = 1,
@@ -377,7 +377,7 @@ export function snapCircuitPoint(
 
     // Nearby terminals/nodes take precedence over the visual grid. Grid snapping is soft:
     // the cursor stays free when the closest grid line is outside the magnetic radius.
-    if (alignment && (!gridIsClose || Math.abs(alignment.delta) <= Math.abs(gridDelta) + 2)) {
+    if (alignment) {
       return { value: point[axis] + alignment.delta, guide: alignment.line };
     }
     return { value: gridIsClose ? gridValue : point[axis], guide: undefined };
