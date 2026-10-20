@@ -283,6 +283,7 @@ function localizeImageError(cause: unknown): Message {
   if (code === 'tooLarge') return { key: 'tooLarge' };
   if (code === 'readFailed') return { key: 'readFailed' };
   if (code === 'invalidImage') return { key: 'invalidImage' };
+  if (code === 'worker' && (cause as ImageApiError).status === 503) return { key: 'workerKeyMissing' };
   if (code === 'worker') return { key: 'workerError', params: { status: (cause as ImageApiError).status ?? '—' } };
   if (code === 'board') return { key: 'invalidBoardJson' };
   return { key: 'imageUnknownError' };
