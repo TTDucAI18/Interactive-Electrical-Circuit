@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState, type DragEvent, type Point
 import { createRoot } from 'react-dom/client';
 import { Activity, BookOpen, Cable, Check, ChevronDown, CircleHelp, CircuitBoard, Crosshair, Download, ImagePlus, Magnet, Plus, RotateCcw, RotateCw, Square, Trash2, Triangle, Zap } from 'lucide-react';
 import ImageWorkbench from './ImageWorkbench';
+import VoltageCalculationWorkbench from './components/voltageCalc/VoltageCalculationWorkbench';
 import { calculateCircuit, circuitEndpointPoint, circuitWireRouteAxis, componentPins, connectCircuitEndpoints, createDefaultCircuit, deserializeCircuit, magnitude, moveCircuitComponent, moveCircuitNode, removeCircuitItem, resetCircuitWireRoute, routeCircuitWire, serializeCircuit, snapCircuitPoint, type CircuitComponent, type CircuitDocument, type CircuitNode, type CircuitResult, type CircuitWire, type ComponentKind, type Point, type WireEndpoint, type WireRouteAxis } from './circuit';
 import { componentNameKey, translate, type Language, type TranslationKey } from './i18n';
 import './style.css';
@@ -65,9 +66,18 @@ function wireRouteCoordinate(wire: CircuitWire, axis: WireRouteAxis, from: Point
   return axis === 'x' ? (from.x + to.x) / 2 : (from.y + to.y) / 2;
 }
 
+function readScreen(): 'simulator' | 'voltageCalc' | 'image' {
+  if (typeof window !== 'undefined') {
+    const h = window.location.hash.toLowerCase();
+    if (h.includes('voltage') || h.includes('calc')) return 'voltageCalc';
+    if (h.includes('image')) return 'image';
+  }
+  return 'simulator';
+}
+
 function App() {
   const [language, setLanguage] = useState<Language>(readLanguage);
-  const [screen, setScreen] = useState<'simulator' | 'image'>('simulator');
+  const [screen, setScreen] = useState<'simulator' | 'voltageCalc' | 'image'>(readScreen);
   const [helpOpen, setHelpOpen] = useState(false);
   const [circuit, setCircuit] = useState<CircuitDocument>(readCircuit);
   const [selected, setSelected] = useState<Selection>(null);
@@ -107,6 +117,11 @@ function App() {
     setNotice(null);
     try { localStorage.setItem(LANGUAGE_KEY, language); } catch { /* Language selection remains available in memory. */ }
   }, [language]);
+  useEffect(() => {
+    const handleHash = () => setScreen(readScreen());
+    window.addEventListener('hashchange', handleHash);
+    return () => window.removeEventListener('hashchange', handleHash);
+  }, []);
   useEffect(() => {
     const timer = window.setTimeout(() => {
       try { localStorage.setItem(CIRCUIT_KEY, serializeCircuit(circuit)); setNotice('saved'); }
@@ -502,14 +517,22 @@ function App() {
     <header className="topbar">
       <a className="brand" href="#top" aria-label={t('brand')}><span className="brand-mark"><CircuitBoard size={21} /></span><span><strong>{t('brand')}</strong><small>{t('brandSub')}</small></span></a>
       <nav className="top-nav" aria-label={t('brand')}>
-        <button className={`nav-link ${screen === 'simulator' ? 'active' : ''}`} onClick={() => { setScreen('simulator'); setHelpOpen(false); }}><Activity size={16} /> {t('simulator')}</button>
-        <button className={`nav-link ${screen === 'image' ? 'active' : ''}`} onClick={() => { setScreen('image'); setHelpOpen(false); }}><ImagePlus size={16} /> {t('imageMode')}</button>
+        <button className={`nav-link ${screen === 'simulator' ? 'active' : ''}`} onClick={() => { setScreen('simulator'); window.location.hash = ''; setHelpOpen(false); }}><Activity size={16} /> {t('simulator')}</button>
+        <button className={`nav-link ${screen === 'voltageCalc' ? 'active' : ''}`} onClick={() => { setScreen('voltageCalc'); window.location.hash = '#voltage-calc'; setHelpOpen(false); }} title={language === 'vi' ? 'Tính toán điện áp & Sơ đồ véc tơ (9 Bước)' : language === 'ru' ? 'Расчет напряжений и векторные диаграммы (9 шагов)' : 'Voltage Calculation & Phasors (9 Steps)'}>
+          <Zap size={16} style={{ color: '#38bdf8' }} /> {language === 'vi' ? 'Tính toán điện áp' : language === 'ru' ? 'Расчет напряжений' : 'Voltage Calculation'}
+          <span style={{ fontSize: '10px', background: 'rgba(56, 189, 248, 0.18)', color: '#38bdf8', padding: '1px 6px', borderRadius: '999px', marginLeft: '5px', fontWeight: 700, border: '1px solid rgba(56, 189, 248, 0.4)' }}>9 Bước</span>
+        </button>
+        <button className={`nav-link ${screen === 'image' ? 'active' : ''}`} onClick={() => { setScreen('image'); window.location.hash = '#image'; setHelpOpen(false); }}><ImagePlus size={16} /> {t('imageMode')}</button>
         {screen === 'simulator' && <button className={`nav-link ${helpOpen ? 'active' : ''}`} onClick={() => setHelpOpen((value) => !value)}><BookOpen size={16} /> {t('guide')}</button>}
       </nav>
       <div className="topbar-end"><label className="language-picker"><span>{t('langLabel')}</span><span className="language-select-wrap"><select aria-label={t('langLabel')} value={language} onChange={(event) => setLanguage(event.target.value as Language)}><option value="vi">{t('langVi')}</option><option value="en">{t('langEn')}</option><option value="ru">{t('langRu')}</option></select><ChevronDown size={13} /></span></label><span className="local-badge"><span className="online-dot" /> {t('runningLocally')}</span></div>
     </header>
 
-    {screen === 'image' ? <ImageWorkbench language={language} /> : <main id="top" className="main-content">
+    {screen === 'voltageCalc' ? (
+      <VoltageCalculationWorkbench onClose={() => { setScreen('simulator'); window.location.hash = ''; }} />
+    ) : screen === 'image' ? (
+      <ImageWorkbench language={language} />
+    ) : <main id="top" className="main-content">
       <section className="intro-row">
         <div><div className="eyebrow"><span className="eyebrow-line" /> {t('heroLabel')}</div><h1>{t('heroTitle')} <span>{t('heroAccent')}</span></h1><p className="intro-copy">{t('heroCopy')}</p></div>
         <div className="intro-actions"><button className="reset-button" onClick={reset}><RotateCcw size={16} /> {t('reset')}</button><button className="export-pdf" onClick={print}><Download size={16} /> {t('exportPdf')}</button></div>
