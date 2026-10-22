@@ -3,13 +3,13 @@ import { createRoot } from 'react-dom/client';
 import { Activity, BookOpen, Cable, Check, ChevronDown, CircleHelp, CircuitBoard, Crosshair, Download, ImagePlus, Magnet, Plus, RotateCcw, RotateCw, Square, Trash2, Triangle, Zap } from 'lucide-react';
 import ImageWorkbench from './ImageWorkbench';
 import VoltageCalculationWorkbench from './components/voltageCalc/VoltageCalculationWorkbench';
-import { calculateCircuit, circuitEndpointPoint, circuitWireRouteAxis, componentPins, connectCircuitEndpoints, createDefaultCircuit, deserializeCircuit, magnitude, moveCircuitComponent, moveCircuitNode, removeCircuitItem, resetCircuitWireRoute, routeCircuitWire, serializeCircuit, snapCircuitPoint, type CircuitComponent, type CircuitDocument, type CircuitNode, type CircuitResult, type CircuitWire, type ComponentKind, type Point, type WireEndpoint, type WireRouteAxis } from './circuit';
+import { CircuitCanvas, wireRouteCoordinate, type CanvasShape, type CanvasShapeKind, type Selection } from './components/CircuitCanvas';
+import { ContextMenu, type ContextMenuTarget } from './components/ContextMenu';
+import { ExportPdfModal } from './components/ExportPdfModal';
+import { applyTOEComponents, calculateCircuit, circuitEndpointPoint, circuitWireRouteAxis, connectCircuitEndpoints, createDefaultCircuit, createTOECircuit, deserializeCircuit, magnitude, moveCircuitComponent, moveCircuitNode, removeCircuitItem, resetCircuitWireRoute, routeCircuitWire, serializeCircuit, snapCircuitPoint, type CircuitComponent, type CircuitDocument, type CircuitNode, type CircuitResult, type CircuitWire, type ComponentKind, type Point, type WireEndpoint, type WireRouteAxis } from './circuit';
 import { componentNameKey, translate, type Language, type TranslationKey } from './i18n';
 import './style.css';
 
-type CanvasShapeKind = 'triangle' | 'square';
-type CanvasShape = { id: string; kind: CanvasShapeKind; x: number; y: number; width: number; height: number };
-type Selection = { kind: 'component' | 'node' | 'wire' | 'shape'; id: string } | null;
 type Tool = 'select' | 'wire';
 const CIRCUIT_KEY = 'iec-circuit-v2';
 const LANGUAGE_KEY = 'iec-language';
@@ -61,10 +61,6 @@ function readCanvasShapes(): CanvasShape[] {
   } catch { return []; }
 }
 function clampScale(value: number, min: number, max: number) { return Math.max(min, Math.min(max, value)); }
-function wireRouteCoordinate(wire: CircuitWire, axis: WireRouteAxis, from: Point, to: Point) {
-  if (wire.via.length) return wire.via[0][axis];
-  return axis === 'x' ? (from.x + to.x) / 2 : (from.y + to.y) / 2;
-}
 
 function readScreen(): 'simulator' | 'voltageCalc' | 'image' {
   if (typeof window !== 'undefined') {
@@ -96,6 +92,8 @@ function App() {
   const [wireStart, setWireStart] = useState<WireEndpoint | null>(null);
   const [wireCursor, setWireCursor] = useState<Point | null>(null);
   const [notice, setNotice] = useState<TranslationKey | null>(null);
+  const [contextMenu, setContextMenu] = useState<ContextMenuTarget | null>(null);
+  const [showExportModal, setShowExportModal] = useState(false);
   const svgRef = useRef<SVGSVGElement>(null);
   const wireDrag = useRef<{ endpoint: WireEndpoint; start: Point; latest: Point } | null>(null);
   const wireRouteDrag = useRef<{ id: string; axis: WireRouteAxis; before: CircuitDocument; startCoordinate: number; moved: boolean } | null>(null);
@@ -239,7 +237,60 @@ function App() {
     }
     setWireStart(null); setWireCursor(null); wireDrag.current = null;
   };
+
+  const handleContextMenu = (event: React.MouseEvent<SVGSVGElement>) => {
+    event.preventDefault();
+    const target = event.target as SVGElement;
+    if (!target || !svgRef.current) return;
+
+    const compEl = target.closest('[data-component-context]') || target.closest('[data-component-id]');
+    if (compEl) {
+      const compId = compEl.getAttribute('data-component-context') || compEl.getAttribute('data-component-id');
+      const comp = circuit.components.find((c) => c.id === compId);
+      if (comp) {
+        setSelected({ kind: 'component', id: comp.id });
+        setContextMenu({ kind: 'component', component: comp, clientX: event.clientX, clientY: event.clientY });
+        return;
+      }
+    }
+
+    const wireEl = target.closest('[data-wire-context]') || target.closest('[data-wire-id]');
+    if (wireEl) {
+      const wireId = wireEl.getAttribute('data-wire-context') || wireEl.getAttribute('data-wire-id');
+      const wire = circuit.wires.find((w) => w.id === wireId);
+      if (wire) {
+        setSelected({ kind: 'wire', id: wire.id });
+        setContextMenu({ kind: 'wire', wire, clientX: event.clientX, clientY: event.clientY });
+        return;
+      }
+    }
+
+    const nodeEl = target.closest('[data-node-context]') || target.closest('[data-node-id]');
+    if (nodeEl) {
+      const nodeId = nodeEl.getAttribute('data-node-context') || nodeEl.getAttribute('data-node-id');
+      const node = circuit.nodes.find((n) => n.id === nodeId);
+      if (node) {
+        setSelected({ kind: 'node', id: node.id });
+        setContextMenu({ kind: 'node', node, clientX: event.clientX, clientY: event.clientY });
+        return;
+      }
+    }
+
+    const rect = svgRef.current.getBoundingClientRect();
+    const svgX = ((event.clientX - rect.left) / rect.width) * 1000;
+    const svgY = ((event.clientY - rect.top) / rect.height) * 700;
+    const boardX = Math.round((svgX - 500 - pan.x) / zoom + 500);
+    const boardY = Math.round((svgY - 350 - pan.y) / zoom + 350);
+    setContextMenu({
+      kind: 'canvas',
+      boardPoint: { x: clampScale(boardX, 50, 950), y: clampScale(boardY, 50, 650) },
+      clientX: event.clientX,
+      clientY: event.clientY,
+    });
+  };
+
   const onPointerDown = (event: PointerEvent<SVGSVGElement>) => {
+    if (event.button === 2) return;
     pointerPositions.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
     if (pointerPositions.current.size >= 2) {
       const [first, second] = [...pointerPositions.current.values()];
@@ -465,7 +516,6 @@ function App() {
     setPendingShapeKind((current) => current === kind ? null : kind);
   };
   const centerView = () => { setPan({ x: 0, y: 0 }); setZoom(1); };
-  const print = () => window.print();
 
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
@@ -473,6 +523,7 @@ function App() {
       const element = event.target as HTMLElement;
       if (['INPUT', 'SELECT', 'TEXTAREA'].includes(element.tagName) || element.isContentEditable) return;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); undo(); return; }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'p') { event.preventDefault(); setShowExportModal(true); return; }
       if (/^[1-6]$/.test(event.key)) { event.preventDefault(); addComponent(paletteKinds[Number(event.key) - 1]); return; }
       if (event.key.toLowerCase() === 'j') { event.preventDefault(); setPendingJunction(true); setPendingComponentKind(null); setPendingShapeKind(null); return; }
       if (event.key === 'Backspace' || event.key === 'Delete') {
@@ -529,13 +580,40 @@ function App() {
     </header>
 
     {screen === 'voltageCalc' ? (
-      <VoltageCalculationWorkbench onClose={() => { setScreen('simulator'); window.location.hash = ''; }} />
+      <VoltageCalculationWorkbench
+        onClose={() => { setScreen('simulator'); window.location.hash = ''; }}
+        circuit={circuit}
+        onSyncToSimulator={(compList, cfg) => {
+          pushUndo(circuit);
+          setCircuit((prev) => applyTOEComponents(prev, compList, cfg.E, cfg.f));
+          setNotice('saved');
+        }}
+      />
     ) : screen === 'image' ? (
-      <ImageWorkbench language={language} />
+      <ImageWorkbench
+        language={language}
+        onTransferToSimulator={(imported) => {
+          pushUndo(circuit);
+          setCircuit(imported);
+          setScreen('simulator');
+          window.location.hash = '';
+          setNotice('saved');
+        }}
+        onOpenVoltageCalc={() => {
+          setScreen('voltageCalc');
+          window.location.hash = '#voltage-calc';
+        }}
+      />
     ) : <main id="top" className="main-content">
       <section className="intro-row">
         <div><div className="eyebrow"><span className="eyebrow-line" /> {t('heroLabel')}</div><h1>{t('heroTitle')} <span>{t('heroAccent')}</span></h1><p className="intro-copy">{t('heroCopy')}</p></div>
-        <div className="intro-actions"><button className="reset-button" onClick={reset}><RotateCcw size={16} /> {t('reset')}</button><button className="export-pdf" onClick={print}><Download size={16} /> {t('exportPdf')}</button></div>
+        <div className="intro-actions">
+          <button className="reset-button" onClick={() => { pushUndo(circuit); setCircuit(createTOECircuit()); setNotice('saved'); }} title={language === 'vi' ? 'Nạp sơ đồ mạch 8 phần tử chuẩn TOE' : 'Load Standard 8-Slot TOE Circuit'}>
+            <Zap size={16} style={{ color: '#38bdf8' }} /> {language === 'vi' ? 'Mạch Chuẩn TOE' : 'TOE Circuit'}
+          </button>
+          <button className="reset-button" onClick={reset}><RotateCcw size={16} /> {t('reset')}</button>
+          <button className="export-pdf" onClick={() => setShowExportModal(true)}><Download size={16} /> {t('exportPdf')}</button>
+        </div>
       </section>
 
       {helpOpen && <HelpPanel language={language} onClose={() => setHelpOpen(false)} />}
@@ -564,7 +642,7 @@ function App() {
               <button className={`tool-button ${showAxes ? 'active' : ''}`} aria-pressed={showAxes} title={t('toggleAxes')} onClick={() => setShowAxes((value) => !value)}><span className="axis-tool-mark">OXY</span> {t('toggleAxes')}</button>
               <button className="tool-button" title={t('centerView')} aria-label={t('centerView')} onClick={centerView}><Crosshair size={15} /> {t('centerView')}</button>
               <button className="tool-button undo-button" onClick={undo} disabled={!canUndo} title={t('undo')}><RotateCcw size={15} /> {t('undo')}</button>
-              <button className="tool-button pdf-mobile" onClick={print}><Download size={15} /> {t('exportPdf')}</button>
+              <button className="tool-button pdf-mobile" onClick={() => setShowExportModal(true)}><Download size={15} /> {t('exportPdf')}</button>
             </div></div>
             <div className="canvas-help"><CircleHelp size={15} /> <span>{pendingShapeKind ? t('placeShapeHint') : pendingComponentKind || pendingJunction ? t('placePartHint') : wireStart ? t('wireStarted') : t('canvasHelp')}</span>{(pendingComponentKind || pendingJunction || pendingShapeKind) && <button className="cancel-placement" onClick={() => { setPendingComponentKind(null); setPendingJunction(false); setPendingShapeKind(null); }}>{t('cancel')}</button>}</div>
             <div className="view-controls">
@@ -572,7 +650,7 @@ function App() {
               <label className="range-control"><span>{t('componentScale')}</span><input aria-label={t('componentScale')} type="range" min="0.65" max="1.6" step="0.05" value={componentScale} onChange={(event) => setComponentScale(Number(event.target.value))} /><output>{Math.round(componentScale * 100)}%</output></label>
             </div>
             <div className="canvas-wrap" onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; }} onDrop={dropPosition}>
-              <CircuitCanvas circuit={circuit} selected={selected} hovered={hovered} language={language} svgRef={svgRef} wireStart={wireStart} wireCursor={wireCursor} readOnly={false} zoom={zoom} pan={pan} componentScale={componentScale} guides={guides} shapes={shapes} showAxes={showAxes} isPanning={isPanning} routeEditable={tool === 'select'} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onSelect={setSelected} onHover={setHovered} onWheel={(event) => { if (event.ctrlKey || event.metaKey) { event.preventDefault(); setZoom((value) => clampScale(value * Math.exp(-event.deltaY * 0.002), 0.5, 2)); } }} />
+              <CircuitCanvas circuit={circuit} selected={selected} hovered={hovered} language={language} svgRef={svgRef} wireStart={wireStart} wireCursor={wireCursor} readOnly={false} zoom={zoom} pan={pan} componentScale={componentScale} guides={guides} shapes={shapes} showAxes={showAxes} isPanning={isPanning} routeEditable={tool === 'select'} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onSelect={setSelected} onHover={setHovered} onWheel={(event) => { if (event.ctrlKey || event.metaKey) { event.preventDefault(); setZoom((value) => clampScale(value * Math.exp(-event.deltaY * 0.002), 0.5, 2)); } }} onContextMenu={handleContextMenu} />
             </div>
           </section>
           <section className="results-card" aria-live="polite"><div className="section-heading result-heading"><div><span className="section-kicker">{t('resultTitle')}</span><h2>{t('resultTitle')}</h2></div><span className="live-pill"><span /> {t('live')}</span></div>
@@ -593,6 +671,107 @@ function App() {
 
       <footer className="page-footer"><span>{t('footer')}</span><span>{t('privacy')}</span></footer>
       <PrintReport circuit={circuit} result={result} errorMessage={result ? '' : errorText(calculation.error)} language={language} />
+
+      {showExportModal && (
+        <ExportPdfModal
+          circuit={circuit}
+          result={result}
+          language={language}
+          onClose={() => setShowExportModal(false)}
+        />
+      )}
+
+      {contextMenu && (
+        <ContextMenu
+          target={contextMenu}
+          language={language}
+          onClose={() => setContextMenu(null)}
+          onRotateComponent={(id, delta) => {
+            pushUndo(circuit);
+            updateComponent(id, { rotation: ((circuit.components.find((c) => c.id === id)?.rotation ?? 0) + delta) % 360 });
+          }}
+          onDuplicateComponent={(id) => {
+            const src = circuit.components.find((c) => c.id === id);
+            if (!src) return;
+            pushUndo(circuit);
+            const cloneId = newId('c');
+            const clone: CircuitComponent = {
+              ...src,
+              id: cloneId,
+              label: `${src.label}'`,
+              x: clampScale(src.x + 30, 50, 950),
+              y: clampScale(src.y + 30, 50, 650),
+            };
+            setCircuit((c) => ({ ...c, components: [...c.components, clone] }));
+            setSelected({ kind: 'component', id: cloneId });
+            setNotice('saved');
+          }}
+          onDeleteComponent={(id) => removeSelected({ kind: 'component', id })}
+          onToggleSwitch={(id) => {
+            const sw = circuit.components.find((c) => c.id === id);
+            if (sw) updateComponent(id, { switchClosed: !sw.switchClosed });
+          }}
+          onEditComponent={(id) => setSelected({ kind: 'component', id })}
+          onAutoRouteWire={(id) => {
+            pushUndo(circuit);
+            setCircuit((c) => resetCircuitWireRoute(c, id));
+            setNotice('routeUpdated');
+          }}
+          onFlipWireAxis={(id) => {
+            pushUndo(circuit);
+            setCircuit((c) => ({
+              ...c,
+              wires: c.wires.map((w) => (w.id === id ? { ...w, routeAxis: w.routeAxis === 'x' ? 'y' : 'x' } : w)),
+            }));
+            setNotice('routeUpdated');
+          }}
+          onDeleteWire={(id) => removeSelected({ kind: 'wire', id })}
+          onStartWireFromNode={(nodeId) => {
+            setTool('wire');
+            setWireStart({ type: 'node', nodeId });
+          }}
+          onDeleteNode={(nodeId) => removeSelected({ kind: 'node', id: nodeId })}
+          onAddComponent={(kind, pos) => {
+            pushUndo(circuit);
+            const newComp: CircuitComponent = {
+              id: newId('c'),
+              label: `${kind}${circuit.components.filter((c) => c.kind === kind).length + 1}`,
+              kind,
+              value: kind === 'R' ? 100 : kind === 'L' ? 10 : kind === 'C' ? 10 : kind === 'VAC' ? 220 : 0,
+              x: pos.x,
+              y: pos.y,
+              rotation: 0,
+              phase: 0,
+              switchClosed: true,
+            };
+            setCircuit((c) => ({ ...c, components: [...c.components, newComp] }));
+            setSelected({ kind: 'component', id: newComp.id });
+            setNotice('saved');
+          }}
+          onAddJunction={(pos) => {
+            pushUndo(circuit);
+            const newNode: CircuitNode = {
+              id: newId('n'),
+              label: `N${circuit.nodes.length + 1}`,
+              x: pos.x,
+              y: pos.y,
+            };
+            setCircuit((c) => ({ ...c, nodes: [...c.nodes, newNode] }));
+            setSelected({ kind: 'node', id: newNode.id });
+            setNotice('saved');
+          }}
+          onResetView={() => {
+            setZoom(1);
+            setPan({ x: 0, y: 0 });
+          }}
+          onLoadTOECircuit={() => {
+            pushUndo(circuit);
+            setCircuit(createTOECircuit());
+            setNotice('saved');
+          }}
+          onOpenExportPdf={() => setShowExportModal(true)}
+        />
+      )}
     </main>}
   </div>;
 }
@@ -643,104 +822,6 @@ function endpointLabel(endpoint: WireEndpoint, circuit: CircuitDocument, languag
   if (endpoint.type === 'node') return circuit.nodes.find((node) => node.id === endpoint.nodeId)?.label ?? translate(language, 'unknownNode');
   const component = circuit.components.find((part) => part.id === endpoint.componentId);
   return `${component?.label ?? endpoint.componentId}.${endpoint.pinId}`;
-}
-
-type CanvasProps = {
-  circuit: CircuitDocument; selected: Selection; hovered?: Selection; language: Language; svgRef: React.RefObject<SVGSVGElement>;
-  wireStart: WireEndpoint | null; wireCursor: Point | null; readOnly: boolean;
-  zoom?: number; pan?: Point; componentScale?: number; guides?: { x?: number; y?: number }; shapes?: CanvasShape[]; showAxes?: boolean; isPanning?: boolean; routeEditable?: boolean;
-  onPointerDown?: (event: PointerEvent<SVGSVGElement>) => void; onPointerMove?: (event: PointerEvent<SVGSVGElement>) => void; onPointerUp?: (event: PointerEvent<SVGSVGElement>) => void; onSelect?: (selection: Selection) => void; onHover?: (selection: Selection) => void; onWheel?: (event: React.WheelEvent<SVGSVGElement>) => void;
-};
-function CircuitCanvas({ circuit, selected, hovered = null, language, svgRef, wireStart, wireCursor, readOnly, zoom = 1, pan = { x: 0, y: 0 }, componentScale = 1, guides = {}, shapes = [], showAxes = false, isPanning = false, routeEditable = true, onPointerDown, onPointerMove, onPointerUp, onSelect, onHover, onWheel }: CanvasProps) {
-  const t = (key: Parameters<typeof translate>[1]) => translate(language, key);
-  const componentById = new Map(circuit.components.map((part) => [part.id, part]));
-  const nodes = new Map(circuit.nodes.map((node) => [node.id, node]));
-  const pointOf = (endpoint: WireEndpoint): Point => endpoint.type === 'node' ? nodes.get(endpoint.nodeId) ?? { x: 0, y: 0 } : componentPins(componentById.get(endpoint.componentId)!, componentScale).find((pin) => pin.pinId === endpoint.pinId) ?? { x: 0, y: 0 };
-  const pathOf = (wire: CircuitWire) => {
-    const from = pointOf(wire.from); const to = pointOf(wire.to);
-    if (wire.via.length === 1) {
-      const bend = wire.via[0];
-      return `M ${from.x} ${from.y} H ${bend.x} V ${bend.y} H ${to.x} V ${to.y}`;
-    }
-    if (wire.via.length >= 2 && wire.routeAxis) {
-      const axis = circuitWireRouteAxis(wire, from, to);
-      const coordinate = wire.via[0][axis];
-      return axis === 'x'
-        ? `M ${from.x} ${from.y} H ${coordinate} V ${to.y} H ${to.x}`
-        : `M ${from.x} ${from.y} V ${coordinate} H ${to.x} V ${to.y}`;
-    }
-    if (wire.via.length > 1) {
-      let route = `M ${from.x} ${from.y}`;
-      for (const point of [...wire.via, to]) route += ` H ${point.x} V ${point.y}`;
-      return route;
-    }
-    if (Math.abs(from.y - to.y) < 1) return `M ${from.x} ${from.y} H ${to.x}`;
-    if (Math.abs(from.x - to.x) < 1) return `M ${from.x} ${from.y} V ${to.y}`;
-    const mid = (from.x + to.x) / 2;
-    return `M ${from.x} ${from.y} H ${mid} V ${to.y} H ${to.x}`;
-  };
-  const previewStart = wireStart ? pointOf(wireStart) : null;
-  const displayValue = (part: CircuitComponent) => part.kind === 'R' ? `${part.value} Ω` : part.kind === 'L' ? `${part.value} mH` : part.kind === 'C' ? `${part.value} µF` : part.kind === 'VAC' ? `${part.value} V` : part.kind === 'SW' ? (part.switchClosed ? t('closed') : t('open')) : '';
-  return <svg ref={svgRef} className={`circuit-svg ${readOnly ? 'read-only' : 'pan-enabled'} ${isPanning ? 'is-panning' : ''}`} viewBox="0 0 1000 700" role="img" aria-label={t('canvasTitle')} onPointerDown={readOnly ? undefined : onPointerDown} onPointerMove={readOnly ? undefined : onPointerMove} onPointerUp={readOnly ? undefined : onPointerUp} onPointerCancel={readOnly ? undefined : onPointerUp} onPointerLeave={readOnly ? undefined : () => onHover?.(null)} onWheel={readOnly ? undefined : onWheel}>
-    <defs><pattern id={readOnly ? 'print-grid' : 'editor-grid'} width="20" height="20" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1.5" fill="#e5eae4" /></pattern><marker id={readOnly ? 'axis-arrow-print' : 'axis-arrow'} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#7b9a80" /></marker></defs>
-    <g transform={`translate(${500 + pan.x} ${350 + pan.y}) scale(${zoom}) translate(-500 -350)`}>
-    <rect width="1000" height="700" rx="16" fill={`url(#${readOnly ? 'print-grid' : 'editor-grid'})`} />
-    {showAxes && <g className="coordinate-axes" pointerEvents="none">
-      <path d="M 55 650 H 978 M 55 650 V 26" markerEnd={`url(#${readOnly ? 'axis-arrow-print' : 'axis-arrow'})`} />
-      {Array.from({ length: 9 }, (_, index) => 155 + index * 100).map((x) => <path key={`x-${x}`} d={`M ${x} 645 V 655`} />)}
-      {Array.from({ length: 6 }, (_, index) => 550 - index * 100).map((y) => <path key={`y-${y}`} d={`M 50 ${y} H 60`} />)}
-      {Array.from({ length: 9 }, (_, index) => 155 + index * 100).map((x, index) => <g key={`x-label-${x}`} transform={`translate(${x} 670) scale(${1 / zoom})`}><text className="axis-value" textAnchor="middle">{(index + 1) * 100}</text></g>)}
-      {Array.from({ length: 6 }, (_, index) => 550 - index * 100).map((y, index) => <g key={`y-label-${y}`} transform={`translate(42 ${y}) scale(${1 / zoom})`}><text className="axis-value" textAnchor="end" y="4">{(index + 1) * 100}</text></g>)}
-      <g transform={`translate(978 648) scale(${1 / zoom})`}><text x="8" y="5">X</text></g>
-      <g transform={`translate(55 26) scale(${1 / zoom})`}><text x="8" y="-8">Y</text></g>
-      <g transform={`translate(55 650) scale(${1 / zoom})`}><text x="-18" y="23">O</text></g>
-    </g>}
-    {guides.x !== undefined && <line className="alignment-guide" x1={guides.x} x2={guides.x} y1="0" y2="700" />}
-    {guides.y !== undefined && <line className="alignment-guide" x1="0" x2="1000" y1={guides.y} y2={guides.y} />}
-    <g className="wires">{circuit.wires.map((wire) => {
-      const from = pointOf(wire.from); const to = pointOf(wire.to);
-      const axis = circuitWireRouteAxis(wire, from, to);
-      const routeCoordinate = wireRouteCoordinate(wire, axis, from, to);
-      const bend = wire.via.length === 1 ? wire.via[0] : axis === 'x' ? { x: routeCoordinate, y: (from.y + to.y) / 2 } : { x: (from.x + to.x) / 2, y: routeCoordinate };
-      const isActive = selected?.kind === 'wire' && selected.id === wire.id || hovered?.kind === 'wire' && hovered.id === wire.id;
-      return <g key={wire.id} className={hovered?.kind === 'wire' && hovered.id === wire.id ? 'hovered' : ''} onPointerEnter={!readOnly ? () => onHover?.({ kind: 'wire', id: wire.id }) : undefined}>
-        <path d={pathOf(wire)} className={`wire-visible ${selected?.kind === 'wire' && selected.id === wire.id ? 'selected' : ''}`} />
-        <path d={pathOf(wire)} className="wire-hit" data-wire-id={wire.id} onClick={readOnly ? undefined : () => onSelect?.({ kind: 'wire', id: wire.id })} />
-        {!readOnly && routeEditable && <><circle className={`wire-route-hit ${isActive ? 'visible' : ''}`} cx={bend.x} cy={bend.y} r="17" data-wire-route-handle={wire.id} aria-label={t('routeHandleHint')} role="button" tabIndex={0}><title>{t('routeHandleHint')}</title></circle>{isActive && <circle className="wire-route-knob" cx={bend.x} cy={bend.y} r="5" pointerEvents="none" />}</>}
-      </g>;
-    })}
-      {wireStart && wireCursor && previewStart && <path className="wire-preview" d={`M ${previewStart.x} ${previewStart.y} L ${wireCursor.x} ${wireCursor.y}`} />}</g>
-    {shapes.map((shape) => <g key={shape.id} className={`utility-shape ${selected?.kind === 'shape' && selected.id === shape.id ? 'selected' : ''} ${hovered?.kind === 'shape' && hovered.id === shape.id ? 'hovered' : ''}`} data-utility-shape={shape.id} transform={`translate(${shape.x} ${shape.y})`} onPointerEnter={!readOnly ? () => onHover?.({ kind: 'shape', id: shape.id }) : undefined}>
-      {shape.kind === 'triangle'
-        ? <polygon points={`0,${-shape.height / 2} ${shape.width / 2},${shape.height / 2} ${-shape.width / 2},${shape.height / 2}`} />
-        : <rect x={-shape.width / 2} y={-shape.height / 2} width={shape.width} height={shape.height} rx="4" />}
-      {!readOnly && selected?.kind === 'shape' && selected.id === shape.id && <circle className="shape-resize-handle" data-shape-resize={shape.id} cx={shape.width / 2} cy={shape.height / 2} r="8" />}
-      <g transform={`translate(0 ${shape.height / 2 + 20}) scale(${1 / zoom})`}><text className="utility-shape-label">{shape.kind === 'triangle' ? t('shapeTriangle') : t('shapeSquare')}</text></g>
-    </g>)}
-    {circuit.nodes.map((node) => <g key={node.id} className={`junction ${selected?.kind === 'node' && selected.id === node.id ? 'selected' : ''} ${hovered?.kind === 'node' && hovered.id === node.id ? 'hovered' : ''}`} data-node-id={node.id} onPointerEnter={!readOnly ? () => onHover?.({ kind: 'node', id: node.id }) : undefined}>
-      <circle className="junction-hit" cx={node.x} cy={node.y} r="16" /><circle className="junction-dot" cx={node.x} cy={node.y} r="6" /><g transform={`translate(${node.x + 10} ${node.y - 10}) scale(${1 / zoom})`}><text>{node.label}</text></g>
-      {!readOnly && <circle className="endpoint-hit" data-endpoint={JSON.stringify({ type: 'node', nodeId: node.id } satisfies WireEndpoint)} cx={node.x} cy={node.y} r="14" />}
-    </g>)}
-    {circuit.components.map((part) => {
-      const selectedPart = selected?.kind === 'component' && selected.id === part.id;
-      const hoveredPart = hovered?.kind === 'component' && hovered.id === part.id;
-      const pins = componentPins(part, componentScale);
-      return <g key={part.id} className={`circuit-part ${selectedPart ? 'selected' : ''} ${hoveredPart ? 'hovered' : ''}`} data-component-id={part.id} transform={`translate(${part.x} ${part.y}) rotate(${part.rotation}) scale(${componentScale})`} onPointerEnter={!readOnly ? () => onHover?.({ kind: 'component', id: part.id }) : undefined}>
-        <rect className="part-hitbox" x="-47" y="-34" width="94" height="68" rx="9" />
-        {part.kind === 'R' && <><rect className="symbol-body" x="-22" y="-14" width="44" height="28" rx="4"/><path className="symbol-line" d="M-18 0h5l4-8 7 16 7-16 7 16 5-8h4" /></>}
-        {part.kind === 'L' && <path className="symbol-inductor" d="M-30 0h5a7 7 0 0 1 14 0 7 7 0 0 1 14 0 7 7 0 0 1 14 0h5" />}
-        {part.kind === 'C' && <><path className="symbol-line" d="M-30 0h20m20 0h20M-10-13v26M10-13v26" /></>}
-        {part.kind === 'VAC' && <><circle className="symbol-source" cx="0" cy="0" r="18"/><path className="symbol-line" d="M-11 0c4-9 7-9 11 0s7 9 11 0" /></>}
-        {part.kind === 'GND' && <><path className="symbol-line" d="M0-16v12m-14 0h28m-10 6h-8m5 6h-2" /></>}
-        {part.kind === 'SW' && <><path className="symbol-line" d={`M-30 0h10m30 0h10M-20 0l${part.switchClosed ? '40' : '31'} ${part.switchClosed ? '0' : '-14'}`} /><circle className="switch-contact" cx="-20" cy="0" r="3"/><circle className="switch-contact" cx="20" cy="0" r="3"/></>}
-        <g transform={`scale(${1 / zoom})`}><text className="part-reference" x="0" y="-25" textAnchor="middle">{part.label}</text>
-        <text className="part-value" x="0" y="29" textAnchor="middle">{displayValue(part)}</text></g>
-        {!readOnly && pins.map((pin) => <circle key={pin.pinId} className={`terminal ${wireStart && JSON.stringify(wireStart) === JSON.stringify({ type: 'pin', componentId: part.id, pinId: pin.pinId }) ? 'wire-origin' : ''}`} data-endpoint={JSON.stringify({ type: 'pin', componentId: part.id, pinId: pin.pinId } satisfies WireEndpoint)} cx={pin.pinId === 'a' ? -30 : pin.pinId === 'b' ? 30 : 0} cy={pin.pinId === 'g' ? -20 : 0} r="6" />)}
-        {!readOnly && <rect className="part-drag-target" x="-28" y="-17" width="56" height="34" />}
-      </g>;
-    })}
-    </g>
-  </svg>;
 }
 
 function Results({ result, circuit, language, onComponentChange }: { result: CircuitResult; circuit: CircuitDocument; language: Language; onComponentChange: (id: string, patch: Partial<CircuitComponent>) => void }) {

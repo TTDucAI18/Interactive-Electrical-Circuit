@@ -9,3 +9,5 @@ dist/
 .env.local
 .env.*.local
 **/.dev.vars
+groq_api.txt
+*_api.txt

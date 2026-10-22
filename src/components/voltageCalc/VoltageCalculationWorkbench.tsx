@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   calculateVoltageCalc,
   DEFAULT_VCALC_COMPONENTS,
@@ -14,9 +14,25 @@ import PhasorDiagram from './PhasorDiagram';
 import TriangleDiagram from './TriangleDiagram';
 import CompensationTriangleDiagram from './CompensationTriangleDiagram';
 
+import { extractTOEComponents, type CircuitDocument } from '../../circuit';
+
 // ---------------------------------------------------------------------------
 // Types & constants
 // ---------------------------------------------------------------------------
+const VCALC_STORAGE_KEY = 'iec-voltage-calc-v1';
+
+function readVCalcStorage() {
+  try {
+    const raw = localStorage.getItem(VCALC_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && Array.isArray(parsed.components) && parsed.config) {
+      return parsed as { page?: PageKey; components: SlotComponent[]; config: VCalcConfig };
+    }
+  } catch { /* storage disabled or empty */ }
+  return null;
+}
+
 const PAGES = [
   'input',
   'calc1', 'calc2', 'calc3', 'calc4', 'calc5', 'calc6', 'calc7', 'calc8', 'calc9',
@@ -54,15 +70,25 @@ const NEXT_LABEL: Record<PageKey, string> = {
 // ---------------------------------------------------------------------------
 interface VoltageCalculationWorkbenchProps {
   onClose?: () => void;
+  circuit?: CircuitDocument;
+  onSyncToSimulator?: (components: SlotComponent[], config: VCalcConfig) => void;
 }
 
 // ---------------------------------------------------------------------------
 // Main Component
 // ---------------------------------------------------------------------------
-const VoltageCalculationWorkbench: React.FC<VoltageCalculationWorkbenchProps> = ({ onClose }) => {
-  const [page, setPage] = useState<PageKey>('input');
-  const [components, setComponents] = useState<SlotComponent[]>(DEFAULT_VCALC_COMPONENTS);
-  const [config, setConfig] = useState<VCalcConfig>(DEFAULT_VCALC_CONFIG);
+const VoltageCalculationWorkbench: React.FC<VoltageCalculationWorkbenchProps> = ({ onClose, circuit, onSyncToSimulator }) => {
+  const [page, setPage] = useState<PageKey>(() => readVCalcStorage()?.page || 'input');
+  const [components, setComponents] = useState<SlotComponent[]>(() => readVCalcStorage()?.components || DEFAULT_VCALC_COMPONENTS);
+  const [config, setConfig] = useState<VCalcConfig>(() => readVCalcStorage()?.config || DEFAULT_VCALC_CONFIG);
+  const [syncNotice, setSyncNotice] = useState<string | null>(null);
+
+  // Auto-persist to localStorage on any state change
+  useEffect(() => {
+    try {
+      localStorage.setItem(VCALC_STORAGE_KEY, JSON.stringify({ page, components, config }));
+    } catch { /* storage full / disabled */ }
+  }, [page, components, config]);
 
   const pageIndex = PAGES.indexOf(page);
 
@@ -78,6 +104,27 @@ const VoltageCalculationWorkbench: React.FC<VoltageCalculationWorkbenchProps> = 
   const prevPage = () => {
     const prev = PAGES[Math.max(pageIndex - 1, 0)];
     setPage(prev);
+  };
+
+  // Sync from Simulator circuit
+  const handleSyncFromSimulator = () => {
+    if (!circuit) return;
+    const extracted = extractTOEComponents(circuit);
+    if (extracted) {
+      setComponents(extracted.components);
+      setConfig(extracted.config);
+      setSyncNotice('✅ Đã đồng bộ thông số từ Sơ đồ Simulator!');
+      setTimeout(() => setSyncNotice(null), 3500);
+    }
+  };
+
+  // Push values back to Simulator circuit
+  const handlePushToSimulator = () => {
+    if (onSyncToSimulator) {
+      onSyncToSimulator(components, config);
+      setSyncNotice('✅ Đã cập nhật giá trị linh kiện sang Sơ đồ Simulator!');
+      setTimeout(() => setSyncNotice(null), 3500);
+    }
   };
 
   // Update a single component's value or label
@@ -103,6 +150,8 @@ const VoltageCalculationWorkbench: React.FC<VoltageCalculationWorkbenchProps> = 
   const resetToDefaults = () => {
     setComponents(DEFAULT_VCALC_COMPONENTS);
     setConfig(DEFAULT_VCALC_CONFIG);
+    setSyncNotice('Đã đặt lại thông số mặc định.');
+    setTimeout(() => setSyncNotice(null), 2500);
   };
 
   return (
@@ -146,6 +195,9 @@ const VoltageCalculationWorkbench: React.FC<VoltageCalculationWorkbenchProps> = 
             onUpdateComponent={updateComponent}
             onUpdateConfig={updateConfig}
             onReset={resetToDefaults}
+            onSyncFromSimulator={circuit ? handleSyncFromSimulator : undefined}
+            onPushToSimulator={onSyncToSimulator ? handlePushToSimulator : undefined}
+            syncNotice={syncNotice}
           />
         )}
 
@@ -212,9 +264,21 @@ interface InputPageProps {
   onUpdateComponent: (id: string, field: 'value' | 'label' | 'type', val: string) => void;
   onUpdateConfig: (field: keyof VCalcConfig, val: string) => void;
   onReset: () => void;
+  onSyncFromSimulator?: () => void;
+  onPushToSimulator?: () => void;
+  syncNotice?: string | null;
 }
 
-const InputPage: React.FC<InputPageProps> = ({ components, config, onUpdateComponent, onUpdateConfig, onReset }) => {
+const InputPage: React.FC<InputPageProps> = ({
+  components,
+  config,
+  onUpdateComponent,
+  onUpdateConfig,
+  onReset,
+  onSyncFromSimulator,
+  onPushToSimulator,
+  syncNotice,
+}) => {
   const slotGroups = [
     { label: 'Điện trở (R)', ids: ['slot1', 'slot2', 'slot3', 'slot4'] },
     { label: 'Cuộn cảm / Tụ điện (L, C)', ids: ['slot5', 'slot6', 'slot7', 'slot8'] },
@@ -225,6 +289,23 @@ const InputPage: React.FC<InputPageProps> = ({ components, config, onUpdateCompo
 
   return (
     <div className="vcalc-input-page">
+      {syncNotice && (
+        <div style={{
+          padding: '10px 14px',
+          borderRadius: '8px',
+          background: 'rgba(59, 130, 246, 0.12)',
+          border: '1px solid rgba(59, 130, 246, 0.3)',
+          color: '#60a5fa',
+          fontSize: '13px',
+          marginBottom: '14px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px'
+        }}>
+          <span>ℹ️</span>
+          <span>{syncNotice}</span>
+        </div>
+      )}
       <div className="vcalc-input-header">
         <div className="vcalc-source-card">
           <h3 className="vcalc-section-title">⚡ Nguồn điện</h3>
@@ -298,10 +379,30 @@ const InputPage: React.FC<InputPageProps> = ({ components, config, onUpdateCompo
         ))}
       </div>
 
-      <div className="vcalc-input-actions">
+      <div className="vcalc-input-actions" style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
         <button onClick={onReset} className="vcalc-btn-secondary">
           ↺ Đặt lại giá trị mặc định
         </button>
+        {onSyncFromSimulator && (
+          <button
+            onClick={onSyncFromSimulator}
+            className="vcalc-btn-secondary"
+            title="Đọc thông số từ mạch hiện tại trong tab Simulator"
+            style={{ borderColor: '#3b82f6', color: '#60a5fa' }}
+          >
+            🔄 Đồng bộ từ Sơ đồ Simulator
+          </button>
+        )}
+        {onPushToSimulator && (
+          <button
+            onClick={onPushToSimulator}
+            className="vcalc-btn-secondary"
+            title="Ghi thông số này sang sơ đồ trong tab Simulator"
+            style={{ borderColor: '#10b981', color: '#34d399' }}
+          >
+            📤 Cập nhật sang Sơ đồ Simulator
+          </button>
+        )}
       </div>
     </div>
   );

@@ -1,28 +1,50 @@
 import { useEffect, useRef, useState, type PointerEvent } from 'react';
-import { ArrowLeft, Check, CircleAlert, Download, FileJson2, ImagePlus, LoaderCircle, Plus, Smile, Trash2, Upload, X } from 'lucide-react';
+import { ArrowLeft, Check, CircleAlert, Download, FileJson2, ImagePlus, LoaderCircle, Plus, Trash2, Upload, X, Zap } from 'lucide-react';
 import { imageToBoard, type ImageApiError, type ImageProgress } from './imageApi';
 import { updateBoardComponent, validateBoard, type BoardComponent, type BoardDocument, type BoardMode } from './board';
+import { convertBoardToCircuit } from './boardToCircuit';
+import type { CircuitDocument } from './circuit';
 import { translate, type Language } from './i18n';
 
 type Message = { key: Parameters<typeof translate>[1]; params?: Record<string, string | number> };
 
-export default function ImageWorkbench({ language }: { language: Language }) {
+const IMAGE_BOARD_STORAGE_KEY = 'iec-image-board-v1';
+
+export interface ImageWorkbenchProps {
+  language: Language;
+  onTransferToSimulator?: (circuit: CircuitDocument) => void;
+  onOpenVoltageCalc?: () => void;
+}
+
+export default function ImageWorkbench({ language, onTransferToSimulator, onOpenVoltageCalc }: ImageWorkbenchProps) {
   const t = (key: Parameters<typeof translate>[1], params?: Record<string, string | number>) => translate(language, key, params);
   const [mode, setMode] = useState<BoardMode>('schematic');
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState('');
-  const [board, setBoard] = useState<BoardDocument | null>(null);
+  const [board, setBoard] = useState<BoardDocument | null>(() => {
+    try {
+      const cached = localStorage.getItem(IMAGE_BOARD_STORAGE_KEY);
+      if (cached) return validateBoard(JSON.parse(cached));
+    } catch { /* ignore corrupted cache */ }
+    return null;
+  });
   const [selected, setSelected] = useState('');
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<ImageProgress | null>(null);
   const [elapsed, setElapsed] = useState(0);
-  const [showPrankPaywall, setShowPrankPaywall] = useState(false);
-  const [showJustKidding, setShowJustKidding] = useState(false);
   const [error, setError] = useState<Message | null>(null);
   const [success, setSuccess] = useState<Message | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const jsonInput = useRef<HTMLInputElement>(null);
-  const kiddingTimer = useRef<number | null>(null);
+
+  // Auto-save board to localStorage
+  useEffect(() => {
+    try {
+      if (board) {
+        localStorage.setItem(IMAGE_BOARD_STORAGE_KEY, JSON.stringify(board));
+      }
+    } catch { /* storage full/disabled */ }
+  }, [board]);
 
   useEffect(() => {
     if (!busy) { setElapsed(0); return; }
@@ -30,8 +52,6 @@ export default function ImageWorkbench({ language }: { language: Language }) {
     const timer = window.setInterval(() => setElapsed(Math.floor((Date.now() - startedAt) / 1000)), 250);
     return () => window.clearInterval(timer);
   }, [busy]);
-
-  useEffect(() => () => { if (kiddingTimer.current !== null) window.clearTimeout(kiddingTimer.current); }, []);
 
   const chooseImage = (next: File | undefined) => {
     if (!next) return;
@@ -41,32 +61,23 @@ export default function ImageWorkbench({ language }: { language: Language }) {
     setFile(next);
     setPreview(URL.createObjectURL(next));
     setBoard(null);
+    try { localStorage.removeItem(IMAGE_BOARD_STORAGE_KEY); } catch { /* ignore */ }
     setError(null);
     setSuccess(null);
     setProgress(null);
-    setShowPrankPaywall(false);
-    setShowJustKidding(false);
   };
 
   const parseImage = async () => {
     if (!file) { setError({ key: 'chooseFirst' }); return; }
-    setBusy(true); setProgress(null); setError(null); setSuccess(null); setBoard(null); setShowPrankPaywall(false); setShowJustKidding(false);
+    setBusy(true); setProgress(null); setError(null); setSuccess(null); setBoard(null);
     try {
       const extracted = await imageToBoard(file, mode, language, setProgress);
       setBoard(extracted);
       setSelected(extracted.components[0]?.id ?? '');
       setSuccess({ key: 'imageSuccess' });
-      setShowPrankPaywall(true);
     } catch (cause) {
       setError(localizeImageError(cause));
     } finally { setBusy(false); setProgress(null); }
-  };
-
-  const revealBoard = () => {
-    setShowPrankPaywall(false);
-    setShowJustKidding(true);
-    if (kiddingTimer.current !== null) window.clearTimeout(kiddingTimer.current);
-    kiddingTimer.current = window.setTimeout(() => setShowJustKidding(false), 3000);
   };
 
   const importJson = async (next: File | undefined) => {
@@ -74,7 +85,7 @@ export default function ImageWorkbench({ language }: { language: Language }) {
     try {
       const parsed: unknown = JSON.parse(await next.text());
       const imported = validateBoard(parsed);
-      setBoard(imported); setMode(imported.mode); setFile(null); setPreview(''); setSelected(imported.components[0]?.id ?? ''); setError(null); setSuccess({ key: 'boardOpened' }); setShowPrankPaywall(false); setShowJustKidding(false);
+      setBoard(imported); setMode(imported.mode); setFile(null); setPreview(''); setSelected(imported.components[0]?.id ?? ''); setError(null); setSuccess({ key: 'boardOpened' });
     } catch { setError({ key: 'invalidBoardJson' }); }
     if (jsonInput.current) jsonInput.current.value = '';
   };
@@ -162,7 +173,8 @@ export default function ImageWorkbench({ language }: { language: Language }) {
   };
   const resetUpload = () => {
     if (preview) URL.revokeObjectURL(preview);
-    setFile(null); setPreview(''); setBoard(null); setError(null); setSuccess(null); setProgress(null); setShowPrankPaywall(false); setShowJustKidding(false);
+    setFile(null); setPreview(''); setBoard(null); setError(null); setSuccess(null); setProgress(null);
+    try { localStorage.removeItem(IMAGE_BOARD_STORAGE_KEY); } catch { /* ignore */ }
   };
 
   return <main className="image-workbench">
@@ -193,8 +205,38 @@ export default function ImageWorkbench({ language }: { language: Language }) {
       </section>
 
       <section className="board-card">
-        <div className="section-heading board-heading"><div><span className="section-kicker">{board ? t('reviewEdit') : t('step2')}</span><h2>{board?.title ?? t('previewBoard')}</h2>{board?.summary && <p className="board-description">{board.summary}</p>}</div>
-          {board && <button className="download-button" onClick={downloadBoard}><Download size={15} /> {t('downloadJson')}</button>}
+        <div className="section-heading board-heading">
+          <div><span className="section-kicker">{board ? t('reviewEdit') : t('step2')}</span><h2>{board?.title ?? t('previewBoard')}</h2>{board?.summary && <p className="board-description">{board.summary}</p>}</div>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+            {board && onTransferToSimulator && (
+              <button
+                className="tool-button active"
+                style={{ background: 'linear-gradient(135deg, #0284c7, #2563eb)', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '6px', fontWeight: 600, fontSize: '13px' }}
+                title="Chuyển sơ đồ đã nhận diện sang Canvas Simulator"
+                onClick={() => {
+                  try {
+                    const converted = convertBoardToCircuit(board);
+                    onTransferToSimulator(converted);
+                  } catch {
+                    setError({ key: 'invalidBoardJson' });
+                  }
+                }}
+              >
+                <Zap size={15} /> 🚀 Mở trong Simulator
+              </button>
+            )}
+            {board && onOpenVoltageCalc && (
+              <button
+                className="tool-button"
+                style={{ borderColor: '#38bdf8', color: '#38bdf8', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
+                title="Mở tab tính toán 9 bước"
+                onClick={onOpenVoltageCalc}
+              >
+                📊 Tính toán 9 Bước
+              </button>
+            )}
+            {board && <button className="download-button" onClick={downloadBoard}><Download size={15} /> {t('downloadJson')}</button>}
+          </div>
         </div>
         {board ? <>
           <div className={`board-notice ${board.mode}`}><span className="notice-icon"><CircleAlert size={16} /></span><span>{board.mode === 'pcb' ? t('pcbNotice') : t('schematicNotice')}</span></div>
@@ -216,17 +258,6 @@ export default function ImageWorkbench({ language }: { language: Language }) {
     </section>}
     {board?.mode === 'schematic' && <ConnectionsPanel board={board} language={language} onConnectionChange={updateConnection} onAddNode={addNode} onNodeChange={updateNode} />}
     <footer className="page-footer image-footer"><span>{t('confidenceReview')}</span><span>{t('noApiKey')}</span></footer>
-    {showJustKidding && <div className="just-kidding-toast" role="status"><Smile size={19} /> {t('prankJustKidding')}</div>}
-    {showPrankPaywall && <div className="prank-paywall-backdrop">
-      <section className="prank-paywall" role="dialog" aria-modal="true" aria-labelledby="prank-paywall-title">
-        <span className="prank-smile"><Smile size={27} /></span>
-        <span className="prank-kicker">GEMINI BOARD</span>
-        <h2 id="prank-paywall-title">{t('prankTitle')}</h2>
-        <p>{t('prankOffer')}</p>
-        <button onClick={revealBoard}>{t('prankButton')} <span aria-hidden="true">🙂</span></button>
-        <small>{t('prankDisclaimer')}</small>
-      </section>
-    </div>}
   </main>;
 }
 

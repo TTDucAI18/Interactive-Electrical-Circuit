@@ -250,40 +250,140 @@ function part(id: string, label: string, kind: ComponentKind, x: number, y: numb
 }
 function wire(id: string, from: WireEndpoint, to: WireEndpoint, ...via: Point[]): CircuitWire { return { id, from, to, via }; }
 
-/** Starter network equivalent to the original eight-slot RLC reference circuit. */
-export function createDefaultCircuit(): CircuitDocument {
+/** Creates the standard 8-slot RLC TOE circuit topology matching the Voltage Calculation Workbench. */
+export function createTOECircuit(
+  config = { E: 1000, f: 400 },
+  values = { r1: 25, r2: 1, r3: 4, r4: 81, l1: 35, c1: 20, l2: 54, c2: 40 },
+): CircuitDocument {
   const components = [
-    part('v1', 'V1', 'VAC', 55, 175, 24, 90),
+    part('v1', 'E', 'VAC', 55, 175, config.E, 90),
     part('g1', 'GND', 'GND', 55, 285, 0),
-    part('r1', 'R1', 'R', 174, 85, 10),
-    part('r2', 'R2', 'R', 174, 265, 10),
-    part('l4', 'L4', 'L', 380, 85, 68),
-    part('r3', 'R3', 'R', 380, 265, 22),
-    part('c5', 'C5', 'C', 270, 130, 100, 90),
-    part('r6', 'R6', 'R', 270, 220, 15, 90),
-    part('r7', 'R7', 'R', 490, 175, 47, 90),
-    part('c8', 'C8', 'C', 615, 175, 220, 90),
+    part('r1', 'R1', 'R', 174, 85, values.r1),
+    part('r2', 'R2', 'R', 174, 265, values.r2),
+    part('r4', 'R4', 'R', 380, 85, values.r4),
+    part('r3', 'R3', 'R', 380, 265, values.r3),
+    part('l1', 'L1', 'L', 270, 130, values.l1, 90),
+    part('c1', 'C1', 'C', 270, 220, values.c1, 90),
+    part('l2', 'L2', 'L', 490, 175, values.l2, 90),
+    part('c2', 'C2', 'C', 615, 175, values.c2, 90),
   ];
   const nodes = [
-    { id: 'source+', label: 'V+', x: 92, y: 85 }, { id: 'ground', label: 'GND', x: 92, y: 265 },
-    { id: 'a+', label: 'N1', x: 270, y: 85 }, { id: 'a-', label: 'N2', x: 270, y: 265 },
-    { id: 'b+', label: 'N3', x: 490, y: 85 }, { id: 'b-', label: 'N4', x: 490, y: 265 },
-    { id: 'mid', label: 'N5', x: 270, y: 175 },
+    { id: 'source+', label: 'V+', x: 92, y: 85 },
+    { id: 'ground', label: 'GND', x: 92, y: 265 },
+    { id: 'node1', label: 'N1', x: 270, y: 85 },
+    { id: 'node4', label: 'N4', x: 270, y: 265 },
+    { id: 'mid14', label: 'N14', x: 270, y: 175 },
+    { id: 'node2', label: 'N2', x: 490, y: 85 },
+    { id: 'node3', label: 'N3', x: 490, y: 265 },
   ];
   const wires = [
     wire('w-v-plus', pin('v1', 'a'), node('source+'), { x: 55, y: 85 }),
     wire('w-v-minus', pin('v1', 'b'), node('ground'), { x: 55, y: 265 }),
     wire('w-ground', pin('g1', 'g'), node('ground')),
-    wire('w-r1-a', pin('r1', 'a'), node('source+')), wire('w-r1-b', pin('r1', 'b'), node('a+')),
-    wire('w-r2-a', pin('r2', 'a'), node('ground')), wire('w-r2-b', pin('r2', 'b'), node('a-')),
-    wire('w-l4-a', pin('l4', 'a'), node('a+')), wire('w-l4-b', pin('l4', 'b'), node('b+')),
-    wire('w-r3-a', pin('r3', 'a'), node('a-')), wire('w-r3-b', pin('r3', 'b'), node('b-')),
-    wire('w-c5-a', pin('c5', 'a'), node('a+')), wire('w-c5-b', pin('c5', 'b'), node('mid')),
-    wire('w-r6-a', pin('r6', 'a'), node('mid')), wire('w-r6-b', pin('r6', 'b'), node('a-')),
-    wire('w-r7-a', pin('r7', 'a'), node('b+')), wire('w-r7-b', pin('r7', 'b'), node('b-')),
-    wire('w-c8-a', pin('c8', 'a'), node('b+'), { x: 615, y: 85 }), wire('w-c8-b', pin('c8', 'b'), node('b-'), { x: 615, y: 265 }),
+    wire('w-r1-a', pin('r1', 'a'), node('source+')),
+    wire('w-r1-b', pin('r1', 'b'), node('node1')),
+    wire('w-r2-a', pin('r2', 'a'), node('ground')),
+    wire('w-r2-b', pin('r2', 'b'), node('node4')),
+    wire('w-l1-a', pin('l1', 'a'), node('node1')),
+    wire('w-l1-b', pin('l1', 'b'), node('mid14')),
+    wire('w-c1-a', pin('c1', 'a'), node('mid14')),
+    wire('w-c1-b', pin('c1', 'b'), node('node4')),
+    wire('w-r4-a', pin('r4', 'a'), node('node1')),
+    wire('w-r4-b', pin('r4', 'b'), node('node2')),
+    wire('w-r3-a', pin('r3', 'a'), node('node3')),
+    wire('w-r3-b', pin('r3', 'b'), node('node4')),
+    wire('w-l2-a', pin('l2', 'a'), node('node2')),
+    wire('w-l2-b', pin('l2', 'b'), node('node3')),
+    wire('w-c2-a', pin('c2', 'a'), node('node2'), { x: 615, y: 85 }),
+    wire('w-c2-b', pin('c2', 'b'), node('node3'), { x: 615, y: 265 }),
   ];
-  return { version: 2, frequency: 50, components, nodes, wires };
+  return { version: 2, frequency: config.f, components, nodes, wires };
+}
+
+/** Starter network: uses the standard 8-slot RLC TOE circuit. */
+export function createDefaultCircuit(): CircuitDocument {
+  return createTOECircuit();
+}
+
+/** Extracts TOE parameters from an arbitrary CircuitDocument if present. */
+export function extractTOEComponents(circuit: CircuitDocument) {
+  const findVal = (labelRegex: RegExp, kind: string): number | null => {
+    const comp = circuit.components.find(c => c.kind === kind && labelRegex.test(c.label || c.id));
+    return comp && comp.value > 0 ? comp.value : null;
+  };
+  const source = circuit.components.find(c => c.kind === 'VAC');
+  const E = source && source.value > 0 ? source.value : 1000;
+  const f = circuit.frequency > 0 ? circuit.frequency : 400;
+
+  const r1 = findVal(/r1|r_1|^r$/i, 'R') ?? 25;
+  const r2 = findVal(/r2|r_2/i, 'R') ?? 1;
+  const r4 = findVal(/r4|r_4/i, 'R') ?? 81;
+  const r3 = findVal(/r3|r_3/i, 'R') ?? 4;
+  const l1 = findVal(/l1|l_1|^l$/i, 'L') ?? 35;
+  const c1 = findVal(/c1|c_1|^c$/i, 'C') ?? 20;
+  const l2 = findVal(/l2|l_2/i, 'L') ?? 54;
+  const c2 = findVal(/c2|c_2/i, 'C') ?? 40;
+
+  return {
+    config: { E, f },
+    E,
+    f,
+    components: [
+      { id: 'slot1', label: 'R1', type: 'Resistor' as const, value: r1 },
+      { id: 'slot2', label: 'R2', type: 'Resistor' as const, value: r2 },
+      { id: 'slot3', label: 'R4', type: 'Resistor' as const, value: r4 },
+      { id: 'slot4', label: 'R3', type: 'Resistor' as const, value: r3 },
+      { id: 'slot5', label: 'L1', type: 'Inductor' as const, value: l1 },
+      { id: 'slot6', label: 'C1', type: 'Capacitor' as const, value: c1 },
+      { id: 'slot7', label: 'L2', type: 'Inductor' as const, value: l2 },
+      { id: 'slot8', label: 'C2', type: 'Capacitor' as const, value: c2 },
+    ],
+  };
+}
+
+/** Updates component values in a CircuitDocument from Voltage Calculation slots. */
+export function applyTOEComponents(
+  circuit: CircuitDocument,
+  components: Array<{ id: string; label: string; value: number | string }>,
+  configOrE?: { E: number; f: number } | number,
+  freqParam?: number,
+): CircuitDocument {
+  const E = typeof configOrE === 'object' ? configOrE.E : typeof configOrE === 'number' ? configOrE : 1000;
+  const f = typeof configOrE === 'object' ? configOrE.f : typeof freqParam === 'number' ? freqParam : circuit.frequency;
+
+  const valMap: Record<string, number> = {};
+  for (const c of components) {
+    const num = typeof c.value === 'number' ? c.value : parseFloat(String(c.value));
+    if (!isNaN(num) && num > 0) {
+      if (c.id === 'slot1' || /r1|r_1/i.test(c.label)) valMap.r1 = num;
+      if (c.id === 'slot2' || /r2|r_2/i.test(c.label)) valMap.r2 = num;
+      if (c.id === 'slot3' || /r4|r_4/i.test(c.label)) valMap.r4 = num;
+      if (c.id === 'slot4' || /r3|r_3/i.test(c.label)) valMap.r3 = num;
+      if (c.id === 'slot5' || /l1|l_1/i.test(c.label)) valMap.l1 = num;
+      if (c.id === 'slot6' || /c1|c_1/i.test(c.label)) valMap.c1 = num;
+      if (c.id === 'slot7' || /l2|l_2/i.test(c.label)) valMap.l2 = num;
+      if (c.id === 'slot8' || /c2|c_2/i.test(c.label)) valMap.c2 = num;
+    }
+  }
+
+  const updatedComponents = circuit.components.map(part => {
+    if (part.kind === 'VAC') return { ...part, value: E };
+    if (part.kind === 'R' && /r1|r_1/i.test(part.label) && valMap.r1) return { ...part, value: valMap.r1 };
+    if (part.kind === 'R' && /r2|r_2/i.test(part.label) && valMap.r2) return { ...part, value: valMap.r2 };
+    if (part.kind === 'R' && /r4|r_4/i.test(part.label) && valMap.r4) return { ...part, value: valMap.r4 };
+    if (part.kind === 'R' && /r3|r_3/i.test(part.label) && valMap.r3) return { ...part, value: valMap.r3 };
+    if (part.kind === 'L' && /l1|l_1/i.test(part.label) && valMap.l1) return { ...part, value: valMap.l1 };
+    if (part.kind === 'C' && /c1|c_1/i.test(part.label) && valMap.c1) return { ...part, value: valMap.c1 };
+    if (part.kind === 'L' && /l2|l_2/i.test(part.label) && valMap.l2) return { ...part, value: valMap.l2 };
+    if (part.kind === 'C' && /c2|c_2/i.test(part.label) && valMap.c2) return { ...part, value: valMap.c2 };
+    return part;
+  });
+
+  return {
+    ...circuit,
+    frequency: f,
+    components: updatedComponents,
+  };
 }
 
 export function validateCircuit(value: unknown): CircuitDocument {
